@@ -1,0 +1,31 @@
+# Build output
+**/bin/
+**/obj/
+
+# AWS SAM build artifacts
+.aws-sam/
+
+# Environment / secrets
+.env
+appsettings.Development.json
+appsettings.Local.json
+**/local.settings.json
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# Rider
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deployment packages
+**/*.zip
+
+# NuGet
+*.nupkg

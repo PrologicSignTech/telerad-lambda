@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name     = "TeleRad-Api"
+confirm_changeset = true
+capabilities   = "CAPABILITY_IAM"
+s3_prefix      = "TeleRad-Api"
+resolve_s3 = true
+disable_rollback = true
+image_repositories = []
+
+[default.global.parameters]
+region = "us-east-1"

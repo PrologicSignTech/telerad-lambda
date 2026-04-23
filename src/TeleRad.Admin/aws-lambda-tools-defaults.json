@@ -1,0 +1,13 @@
+{
+  "Information": [
+    "Lambda function for Admin domain: Audit, Fax, Order Status, Modalities, Non-DICOM, Standard Reports, Site Management"
+  ],
+  "profile": "default",
+  "region": "us-east-1",
+  "configuration": "Release",
+  "function-runtime": "dotnet8",
+  "function-memory-size": 512,
+  "function-timeout": 30,
+  "function-handler": "TeleRad.Admin::TeleRad.Admin.Function::Handler",
+  "function-name": "TeleRad-Admin"
+}

@@ -1,0 +1,13 @@
+{
+  "Information": [
+    "Lambda function for Studies domain: Auth, Studies, Notes, Attachments, Final Reports, Dashboard"
+  ],
+  "profile": "default",
+  "region": "us-east-1",
+  "configuration": "Release",
+  "function-runtime": "dotnet8",
+  "function-memory-size": 512,
+  "function-timeout": 30,
+  "function-handler": "TeleRad.Studies::TeleRad.Studies.Function::Handler",
+  "function-name": "TeleRad-Studies"
+}
