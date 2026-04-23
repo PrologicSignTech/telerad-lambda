@@ -7,9 +7,14 @@
 
 # Environment / secrets
 .env
-appsettings.Development.json
-appsettings.Local.json
+appsettings*.json
 **/local.settings.json
+
+# AWS SAM / CloudFormation templates (contain AWS config)
+template.yaml
+template.yml
+**/template.yaml
+**/template.yml
 
 # Visual Studio
 .vs/
