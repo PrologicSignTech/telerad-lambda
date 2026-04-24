@@ -41,15 +41,22 @@ public class UpdateStudyStatusRequest
 public class UpdateStudyRequest
 {
     public int StudyId { get; set; }
-    public string? PatientName { get; set; }
+    public string? PatientName { get; set; }       // pname (full name)
+    public string? PatientFirstName { get; set; }  // firstname
+    public string? PatientLastName { get; set; }   // lastname
+    public string? PatientId { get; set; }         // idnumber
     public string? PatientDob { get; set; }
     public string? Dos { get; set; }
     public string? Modality { get; set; }
-    public string? Description { get; set; }
+    public string? Description { get; set; }       // exam
+    public string? OrderingPhysician { get; set; }
+    public string? AccessionNumber { get; set; }
     public string? Status { get; set; }
     public int? TranscriberId { get; set; }
     public int? RadId { get; set; }
     public int? TemplateId { get; set; }
+    public int? ClientId { get; set; }             // ref_id
+    public string? ReportText { get; set; }
 }
 
 public class MarkStatRequest
@@ -298,6 +305,20 @@ public class GetAttachedFilesRequest
 public class GetPresignedUrlRequest
 {
     public string? FilePath { get; set; }
+}
+
+public class GetPresignedUploadUrlRequest
+{
+    public int StudyId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "audio/webm";
+}
+
+public class UploadAudioAttachmentRequest
+{
+    public int StudyId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string Data { get; set; } = string.Empty; // base64-encoded WAV
 }
 
 public class GetViewerTokenRequest
@@ -674,3 +695,16 @@ public class PushQbTranscribersRequest
 {
     public List<int> TranscriberIds { get; set; } = new();
 }
+
+public class DownloadAudioZipRequest
+{
+    public List<int> StudyIds { get; set; } = new();
+    /// <summary>Map of studyId (as string) → order number, used for folder names in the ZIP.</summary>
+    public Dictionary<string, string> OrderNumbers { get; set; } = new();
+}
+
+public class DeleteTempZipRequest
+{
+    public string ZipKey { get; set; } = string.Empty;
+}
+

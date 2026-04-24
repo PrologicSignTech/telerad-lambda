@@ -197,6 +197,11 @@ public static class QueryHelper
         return Cmd(c, $"UPDATE tran_typewordlist SET stat = 1 WHERE id IN ({idParams})");
     }
 
+    public static MySqlCommand UnmarkStudiesStat(MySqlConnection c, string idParams)
+    {
+        return Cmd(c, $"UPDATE tran_typewordlist SET stat = 0 WHERE id IN ({idParams})");
+    }
+
     public static MySqlCommand CloneStudy(MySqlConnection c, int studyId)
     {
         var cmd = Cmd(c, @"
@@ -209,14 +214,14 @@ public static class QueryHelper
                  report_text_addendum, report_text_signature, addendum_text_signature, is_addendum,
                  addendum_text_temp, pdf_report, pdf_page, type_rad, transfer_id,
                  incoming_order_patient_id, incoming_order_exam_id, trans_new_message_time,
-                 stat, lock, ip, archive, delete, modality, description, sid, ref_id, report_key_image)
+                 stat, `lock`, ip, `archive`, `delete`, modality, description, sid, ref_id, report_key_image)
             SELECT pom_id, rad_id, trans_id, 'new study', ordering_physician, location, pname, firstname,
                  middlename, lastname, gender, dob, idnumber, access_number, dos, dos_time_from,
                  dos_time_to, modalityid, examid, cpt, covered, client_location, templateid,
                  document_type, pay_status, CURDATE(), dictation_status, dictating_trans,
                  dictating_time, audio_name, '', '', '',
                  '', '', '', 0, '', '', 0, type_rad, 0, 0, 0, NOW(),
-                 0, 0, ip, archive, 0, modality, description, sid, ref_id, ''
+                 0, 0, ip, `archive`, 0, modality, description, sid, ref_id, ''
             FROM tran_typewordlist WHERE id = @id");
         cmd.Parameters.AddWithValue("@id", studyId);
         return cmd;
@@ -325,7 +330,9 @@ public static class QueryHelper
     {
         var sql = @"
             SELECT t.id, t.temp_name AS name, t.heading_text AS body_text,
-                   t.userid AS user_id, u.displayname AS user_name
+                   '' AS modality,
+                   t.userid AS user_id, u.displayname AS user_name,
+                   '' AS created_at
             FROM tran_template t
             LEFT JOIN tran_user u ON u.id = CAST(t.userid AS UNSIGNED)
             WHERE 1=1";

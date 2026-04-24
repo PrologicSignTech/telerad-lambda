@@ -114,8 +114,9 @@ public static class QueryHelper
         }
         if (!string.IsNullOrEmpty(search))
         {
-            sql += " AND (s.pname LIKE @q OR s.access_number LIKE @q)";
+            sql += " AND (s.pname LIKE @q OR s.access_number LIKE @q OR CAST(s.id AS CHAR) = @qexact)";
             cmd.Parameters.AddWithValue("@q", $"%{search}%");
+            cmd.Parameters.AddWithValue("@qexact", search.Trim());
         }
         if (!string.IsNullOrEmpty(statusList))
         {
@@ -218,7 +219,8 @@ public static class QueryHelper
 
     public static MySqlCommand UpdateStudyStatus(MySqlConnection c, int studyId, string status)
     {
-        var cmd = Cmd(c, "UPDATE tran_typewordlist SET type = @status WHERE id = @id");
+        // Also resets delete=0 (matching Laravel behaviour: status change always recovers soft-deleted records)
+        var cmd = Cmd(c, "UPDATE tran_typewordlist SET type = @status, `delete` = 0 WHERE id = @id");
         cmd.Parameters.AddWithValue("@status", status);
         cmd.Parameters.AddWithValue("@id", studyId);
         return cmd;
@@ -226,26 +228,45 @@ public static class QueryHelper
 
     public static MySqlCommand DeleteStudy(MySqlConnection c, int studyId)
     {
-        var cmd = Cmd(c, "UPDATE tran_typewordlist SET `delete` = 1 WHERE id = @id");
+        // Mirrors Laravel: setting delete=1 also changes type to 'cancel exam' (Study.php updateFromRequest)
+        var cmd = Cmd(c, "UPDATE tran_typewordlist SET `delete` = 1, type = 'cancel exam' WHERE id = @id");
+        cmd.Parameters.AddWithValue("@id", studyId);
+        return cmd;
+    }
+
+    public static MySqlCommand GetStudyCurrentReportText(MySqlConnection c, int studyId)
+    {
+        var cmd = Cmd(c, "SELECT report_text, type FROM tran_typewordlist WHERE id = @id LIMIT 1");
         cmd.Parameters.AddWithValue("@id", studyId);
         return cmd;
     }
 
     public static MySqlCommand UpdateStudy(MySqlConnection c, int studyId,
-        string? patientName, string? dob, string? dos, string? modality,
-        string? description, string? status, int? transcriberId, int? radId, int? templateId)
+        string? patientName, string? patientFirstName, string? patientLastName,
+        string? patientId, string? dob, string? dos, string? modality,
+        string? description, string? orderingPhysician, string? accessionNumber,
+        string? status, int? transcriberId, int? radId, int? templateId, int? clientId,
+        string? reportText = null, string? impressionText = null)
     {
         var sets = new List<string>();
         var cmd = new MySqlCommand { Connection = c };
-        if (patientName != null)   { sets.Add("pname = @pn");         cmd.Parameters.AddWithValue("@pn", patientName); }
-        if (dob != null)           { sets.Add("dob = @dob");          cmd.Parameters.AddWithValue("@dob", dob); }
-        if (dos != null)           { sets.Add("dos = @dos");          cmd.Parameters.AddWithValue("@dos", dos); }
-        if (modality != null)      { sets.Add("modality = @mod");     cmd.Parameters.AddWithValue("@mod", modality); }
-        if (description != null)   { sets.Add("description = @desc"); cmd.Parameters.AddWithValue("@desc", description); }
-        if (status != null)        { sets.Add("type = @status");      cmd.Parameters.AddWithValue("@status", status); }
-        if (transcriberId != null) { sets.Add("trans_id = @tid");     cmd.Parameters.AddWithValue("@tid", transcriberId); }
-        if (radId != null)         { sets.Add("rad_id = @rid");       cmd.Parameters.AddWithValue("@rid", radId); }
-        if (templateId != null)    { sets.Add("templateid = @tpid");  cmd.Parameters.AddWithValue("@tpid", templateId); }
+        if (patientName != null)      { sets.Add("pname = @pn");               cmd.Parameters.AddWithValue("@pn",   patientName); }
+        if (patientFirstName != null) { sets.Add("firstname = @fn");           cmd.Parameters.AddWithValue("@fn",   patientFirstName); }
+        if (patientLastName != null)  { sets.Add("lastname = @ln");            cmd.Parameters.AddWithValue("@ln",   patientLastName); }
+        if (patientId != null)        { sets.Add("idnumber = @pid");           cmd.Parameters.AddWithValue("@pid",  patientId); }
+        if (dob != null)              { sets.Add("dob = @dob");                cmd.Parameters.AddWithValue("@dob",  dob); }
+        if (dos != null)              { sets.Add("dos = @dos");                cmd.Parameters.AddWithValue("@dos",  dos); }
+        if (modality != null)         { sets.Add("modality = @mod");           cmd.Parameters.AddWithValue("@mod",  modality); }
+        if (description != null)      { sets.Add("description = @desc");       cmd.Parameters.AddWithValue("@desc", description); }
+        if (orderingPhysician != null){ sets.Add("ordering_physician = @op");  cmd.Parameters.AddWithValue("@op",   orderingPhysician); }
+        if (accessionNumber != null)  { sets.Add("access_number = @an");       cmd.Parameters.AddWithValue("@an",   accessionNumber); }
+        if (status != null)           { sets.Add("type = @status");            cmd.Parameters.AddWithValue("@status", status); }
+        if (transcriberId != null)    { sets.Add("trans_id = @tid");           cmd.Parameters.AddWithValue("@tid",  transcriberId); }
+        if (radId != null)            { sets.Add("rad_id = @rid");             cmd.Parameters.AddWithValue("@rid",  radId); }
+        if (templateId != null)       { sets.Add("templateid = @tpid");        cmd.Parameters.AddWithValue("@tpid", templateId); }
+        if (clientId != null)         { sets.Add("pom_id = @cid");             cmd.Parameters.AddWithValue("@cid",  clientId); }
+        if (reportText != null)       { sets.Add("report_text = @rt");         cmd.Parameters.AddWithValue("@rt",   reportText); }
+        if (impressionText != null)   { sets.Add("impression_text = @imp");    cmd.Parameters.AddWithValue("@imp",  impressionText); }
 
         if (sets.Count == 0) { cmd.CommandText = "SELECT 1"; return cmd; }
         cmd.CommandText = $"UPDATE tran_typewordlist SET {string.Join(", ", sets)} WHERE id = @sid";
@@ -256,6 +277,11 @@ public static class QueryHelper
     public static MySqlCommand MarkStudiesStat(MySqlConnection c, string idParams)
     {
         return Cmd(c, $"UPDATE tran_typewordlist SET stat = 1 WHERE id IN ({idParams})");
+    }
+
+    public static MySqlCommand UnmarkStudiesStat(MySqlConnection c, string idParams)
+    {
+        return Cmd(c, $"UPDATE tran_typewordlist SET stat = 0 WHERE id IN ({idParams})");
     }
 
     public static MySqlCommand CloneStudy(MySqlConnection c, int studyId)
@@ -270,16 +296,36 @@ public static class QueryHelper
                  report_text_addendum, report_text_signature, addendum_text_signature, is_addendum,
                  addendum_text_temp, pdf_report, pdf_page, type_rad, transfer_id,
                  incoming_order_patient_id, incoming_order_exam_id, trans_new_message_time,
-                 stat, lock, ip, archive, delete, modality, description, sid, ref_id, report_key_image)
+                 stat, `lock`, ip, `archive`, `delete`, modality, description, sid, ref_id, report_key_image)
             SELECT pom_id, rad_id, trans_id, 'new study', ordering_physician, location, pname, firstname,
                  middlename, lastname, gender, dob, idnumber, access_number, dos, dos_time_from,
                  dos_time_to, modalityid, examid, cpt, covered, client_location, templateid,
                  document_type, pay_status, CURDATE(), dictation_status, dictating_trans,
                  dictating_time, audio_name, '', '', '',
                  '', '', '', 0, '', '', 0, type_rad, 0, 0, 0, NOW(),
-                 0, 0, ip, archive, 0, modality, description, sid, ref_id, ''
+                 0, 0, ip, `archive`, 0, modality, description, sid, ref_id, ''
             FROM tran_typewordlist WHERE id = @id");
         cmd.Parameters.AddWithValue("@id", studyId);
+        return cmd;
+    }
+
+    public static MySqlCommand GetPatientExamHistory(MySqlConnection c, int studyId)
+    {
+        var cmd = Cmd(c, @"
+            SELECT tw.id, tw.modality, tw.description AS exam, tw.dos, tw.type AS status,
+                   tw.pdf_report AS pdf_path, r.displayname AS rad_name
+            FROM tran_typewordlist tw
+            LEFT JOIN tran_user r ON r.id = tw.rad_id
+            WHERE tw.dob  = (SELECT dob  FROM tran_typewordlist WHERE id = @sid)
+              AND tw.firstname = (SELECT firstname FROM tran_typewordlist WHERE id = @sid)
+              AND tw.lastname  = (SELECT lastname  FROM tran_typewordlist WHERE id = @sid)
+              AND tw.ref_id    = (SELECT ref_id    FROM tran_typewordlist WHERE id = @sid)
+              AND tw.type = 'rad final report'
+              AND tw.`delete` = 0
+              AND tw.id != @sid
+            ORDER BY tw.dos DESC
+            LIMIT 10");
+        cmd.Parameters.AddWithValue("@sid", studyId);
         return cmd;
     }
 
@@ -350,7 +396,7 @@ public static class QueryHelper
     public static MySqlCommand GetNotes(MySqlConnection c, int studyId)
     {
         var cmd = Cmd(c, @"
-            SELECT n.id, u.displayname AS username, n.notes, n.curr_date AS created_at
+            SELECT n.id, n.userid, u.displayname AS username, n.notes, n.curr_date AS created_at
             FROM tran_notes n
             LEFT JOIN tran_user u ON u.id = n.userid
             WHERE n.exam_id = @sid ORDER BY n.curr_date DESC");
@@ -386,7 +432,9 @@ public static class QueryHelper
     {
         var sql = @"
             SELECT t.id, t.temp_name AS name, t.heading_text AS body_text,
-                   t.userid AS user_id, u.displayname AS user_name
+                   '' AS modality,
+                   t.userid AS user_id, u.displayname AS user_name,
+                   '' AS created_at
             FROM tran_template t
             LEFT JOIN tran_user u ON u.id = CAST(t.userid AS UNSIGNED)
             WHERE 1=1";
@@ -1105,11 +1153,17 @@ public static class QueryHelper
                    ref_u.phone                             AS client_phone,
                    ref_u.fax                               AS client_fax,
                    trans_u.displayname                     AS transcriber_name,
+                   rad_u.displayname                       AS rad_name,
                    rad_u.signature                         AS rad_signature,
+                   s.report_text,
+                   s.impression_text,
+                   s.pdf_page,
                    s.rad_id,
                    s.trans_id                              AS transcriber_id,
                    s.stat                                  AS is_stat,
                    s.report_date                           AS updated_at,
+                   (SELECT a.curr_date_time FROM tran_audit a WHERE a.eid = s.id AND a.status_insert = 'DOD Time' ORDER BY a.id DESC LIMIT 1) AS dod,
+                   (SELECT a.curr_date_time FROM tran_audit a WHERE a.eid = s.id AND a.status_insert = 'DOT Time' ORDER BY a.id DESC LIMIT 1) AS dot,
                    COALESCE(
                        NULLIF((SELECT tmpl.header_image FROM tran_template tmpl WHERE tmpl.id = s.templateid LIMIT 1), ''),
                        NULLIF((SELECT tmpl.header_image FROM tran_template tmpl WHERE tmpl.userid = s.ref_id AND tmpl.header_image != '' ORDER BY tmpl.id DESC LIMIT 1), ''),
@@ -1190,11 +1244,17 @@ public static class QueryHelper
                    ref_u.phone                             AS client_phone,
                    ref_u.fax                               AS client_fax,
                    trans_u.displayname                     AS transcriber_name,
+                   rad_u.displayname                       AS rad_name,
                    rad_u.signature                         AS rad_signature,
+                   s.report_text,
+                   s.impression_text,
+                   s.pdf_page,
                    s.rad_id,
                    s.trans_id                              AS transcriber_id,
                    s.stat                                  AS is_stat,
                    s.report_date                           AS updated_at,
+                   (SELECT a.curr_date_time FROM tran_audit a WHERE a.eid = s.id AND a.status_insert = 'DOD Time' ORDER BY a.id DESC LIMIT 1) AS dod,
+                   (SELECT a.curr_date_time FROM tran_audit a WHERE a.eid = s.id AND a.status_insert = 'DOT Time' ORDER BY a.id DESC LIMIT 1) AS dot,
                    COALESCE(
                        NULLIF((SELECT tmpl.header_image FROM tran_template tmpl WHERE tmpl.id = s.templateid LIMIT 1), ''),
                        NULLIF((SELECT tmpl.header_image FROM tran_template tmpl WHERE tmpl.userid = s.ref_id AND tmpl.header_image != '' ORDER BY tmpl.id DESC LIMIT 1), ''),

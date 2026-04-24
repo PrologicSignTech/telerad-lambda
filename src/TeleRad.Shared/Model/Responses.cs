@@ -57,6 +57,9 @@ public class StudyResponse
     public string ReferrerName { get; set; } = string.Empty;
     public string RadName { get; set; } = string.Empty;
     public string TranscriberName { get; set; } = string.Empty;
+    public string ReportText { get; set; } = string.Empty;
+    public string ImpressionText { get; set; } = string.Empty;
+    public int PdfPage { get; set; } = 1;
     public int? RadId { get; set; }
     public int? TranscriberId { get; set; }
     public int? TemplateId { get; set; }
@@ -73,6 +76,7 @@ public class StudyResponse
 public class NoteResponse
 {
     public int Id { get; set; }
+    public int UserId { get; set; }
     public string Username { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public string Date { get; set; } = string.Empty;

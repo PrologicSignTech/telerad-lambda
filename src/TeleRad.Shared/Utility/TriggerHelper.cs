@@ -10,9 +10,11 @@ public static class TriggerHelper
     public const string GetStudies                   = "getStudies";
     public const string GetDailyWorkflowData         = "getDailyWorkflowData";
     public const string UpdateStudyStatus            = "updateStudyStatus";
+    public const string UpdateStudyStatusAuto        = "updateStudyStatusAuto";
     public const string UpdateStudy                  = "updateStudy";
     public const string DeleteStudy                  = "deleteStudy";
     public const string MarkStat                     = "markStat";
+    public const string UnmarkStat                   = "unmarkStat";
     public const string CloneStudy                   = "cloneStudy";
     public const string GetStudyAudit                = "getStudyAudit";
     public const string GetFinalReportUrl            = "getFinalReportUrl";
@@ -20,6 +22,8 @@ public static class TriggerHelper
     public const string UpdateStudyReport            = "updateStudyReport";
     public const string PdfReviewed                  = "pdfReviewed";
     public const string CheckForDownloadAudio        = "checkForDownloadAudio";
+    public const string DownloadAudioZip             = "downloadAudioZip";
+    public const string DeleteTempZip                = "deleteTempZip";
     public const string GetStudyDocument             = "getStudyDocument";
     public const string GetStudyPreview              = "getStudyPreview";
     public const string GetVerificationSheet         = "getVerificationSheet";
@@ -70,6 +74,8 @@ public static class TriggerHelper
     public const string AddMultipleAttachments       = "addMultipleAttachments";
     public const string GetAttachedFiles             = "getAttachedFiles";
     public const string GetPresignedUrl              = "getPresignedUrl";
+    public const string GetPresignedUploadUrl        = "getPresignedUploadUrl";
+    public const string UploadAudioAttachment        = "uploadAudioAttachment";
     public const string SendAudioFiles               = "sendAudioFiles";
     public const string GetSentAudioFiles            = "getSentAudioFiles";
 

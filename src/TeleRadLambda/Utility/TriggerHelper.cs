@@ -12,6 +12,7 @@ public static class TriggerHelper
     public const string UpdateStudyStatus            = "updateStudyStatus";
     public const string UpdateStudy                  = "updateStudy";
     public const string MarkStat                     = "markStat";
+    public const string UnmarkStat                   = "unmarkStat";
     public const string CloneStudy                   = "cloneStudy";
     public const string GetStudyAudit                = "getStudyAudit";
     public const string GetFinalReportUrl            = "getFinalReportUrl";

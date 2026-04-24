@@ -57,6 +57,7 @@ public class Function
                 TriggerHelper.UpdateStudyStatus             => await helper.UpdateStudyStatusAsync(wrapper.Body),
                 TriggerHelper.UpdateStudy                   => await helper.UpdateStudyAsync(wrapper.Body),
                 TriggerHelper.MarkStat                      => await helper.MarkStatAsync(wrapper.Body),
+                TriggerHelper.UnmarkStat                    => await helper.UnmarkStatAsync(wrapper.Body),
                 TriggerHelper.CloneStudy                    => await helper.CloneStudyAsync(wrapper.Body),
                 TriggerHelper.GetStudyAudit                 => await helper.GetStudyAuditAsync(wrapper.Body),
                 TriggerHelper.GetFinalReportUrl             => await helper.GetFinalReportUrlAsync(wrapper.Body),

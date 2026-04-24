@@ -176,6 +176,25 @@ public class Helper
         catch (Exception ex) { return Err("MarkStat", ex); }
     }
 
+    public async Task<APIGatewayProxyResponse> UnmarkStatAsync(string? body)
+    {
+        var req = Parse<MarkStatRequest>(body);
+        if (req == null || req.StudyIds.Count == 0)
+            return Function.BadRequest("StudyIds list is required.");
+        if (req.StudyIds.Any(id => id <= 0))
+            return Function.BadRequest("All StudyIds must be positive integers.");
+
+        try
+        {
+            var idParams = string.Join(",", req.StudyIds);
+            await using var conn = await OpenAsync();
+            await using var cmd  = QueryHelper.UnmarkStudiesStat(conn, idParams);
+            await cmd.ExecuteNonQueryAsync();
+            return Function.Ok(null, "STAT removed from studies.");
+        }
+        catch (Exception ex) { return Err("UnmarkStat", ex); }
+    }
+
     public async Task<APIGatewayProxyResponse> CloneStudyAsync(string? body)
     {
         var req = Parse<CloneStudyRequest>(body);

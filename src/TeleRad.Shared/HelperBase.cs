@@ -58,9 +58,14 @@ public abstract class HelperBase
             var o = r.GetOrdinal(col);
             if (r.IsDBNull(o)) return null;
             var val = r.GetValue(o);
-            if (val is int i) return i;
-            if (val is long l) return (int)l;
-            if (val is uint ui) return (int)ui;
+            if (val is int i)     return i;
+            if (val is long l)    return (int)l;
+            if (val is uint ui)   return (int)ui;
+            if (val is ulong ul)  return (int)ul;
+            if (val is short s)   return (int)s;
+            if (val is ushort us) return (int)us;
+            if (val is byte b)    return (int)b;
+            if (val is sbyte sb)  return (int)sb;
             return int.TryParse(val?.ToString(), out var parsed) ? parsed : (int?)null;
         }
         catch { return null; }
@@ -120,7 +125,11 @@ public abstract class HelperBase
             ClientUsername    = StrOpt(r, "client_username") ?? string.Empty,
             HeaderImage       = PresignedUrl(StrOpt(r, "header_image")),
             HeadingText       = StrOpt(r, "heading_text"),
+            RadName           = StrOpt(r, "rad_name"),
             RadSignature      = StrOpt(r, "rad_signature"),
+            ReportText        = StrOpt(r, "report_text"),
+            ImpressionText    = StrOpt(r, "impression_text"),
+            PdfPage           = SafeInt(r, "pdf_page") is int pdfP && pdfP > 0 ? pdfP : 1,
             ClientAddress     = StrOpt(r, "client_address"),
             ClientPhone       = StrOpt(r, "client_phone"),
             ClientFax         = StrOpt(r, "client_fax"),
@@ -129,6 +138,8 @@ public abstract class HelperBase
             RadId             = SafeInt(r, "rad_id"),
             TranscriberId     = SafeInt(r, "transcriber_id"),
             IsStat            = SafeInt(r, "is_stat") == 1,
+            Dod               = SafeDateStr(r, "dod"),
+            Dot               = SafeDateStr(r, "dot"),
             CreatedAt         = SafeDateStr(r, "created_at"),
             UpdatedAt         = SafeDateStr(r, "updated_at")
         };

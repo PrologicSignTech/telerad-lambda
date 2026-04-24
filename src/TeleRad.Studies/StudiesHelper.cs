@@ -111,11 +111,20 @@ public class StudiesHelper : HelperBase
         if (req == null || req.StudyId <= 0 || string.IsNullOrWhiteSpace(req.Status))
             return FunctionBase.BadRequest("StudyId and Status are required.");
 
-        var allowed = new HashSet<string>
+        // Allowed statuses — supports both DB (spaces) and API (underscores) formats
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
+            // DB values (with spaces)
+            "cancel exam","canceled exam","missing images","missing paperwork",
+            "new study","new  study","rad final report","rad non dicom accunts",
+            "rad reports pending signature","review","speak to tech",
+            "trans new message","trans new messages","trans reports on hold",
+            "rad reports on hold","hold for comparison",
+            // API / underscore equivalents
             "new_study","trans_new_messages","trans_reports_on_hold","rad_reports_on_hold",
             "rad_reports_pending_signature","hold_for_comparison","missing_paperwork",
-            "speak_to_tech","missing_images","review","finalized","no_audio","in_progress","cancelled"
+            "speak_to_tech","missing_images","rad_final_report","finalized",
+            "no_audio","in_progress","cancelled","cancel_exam","canceled_exam"
         };
         if (!allowed.Contains(req.Status.ToLower()))
             return FunctionBase.BadRequest($"Invalid status: {req.Status}");
@@ -130,6 +139,87 @@ public class StudiesHelper : HelperBase
         catch (Exception ex) { return Err("UpdateStudyStatus", ex); }
     }
 
+    /// <summary>
+    /// Mirrors Laravel's updateStatus() — auto-advances status based on business rules:
+    /// rad_final_report → new_study or trans_new_messages (depending on audio attachment).
+    /// cancel_exam       → new_study or trans_new_messages.
+    /// Resets delete=0 in all cases.
+    /// </summary>
+    public async Task<APIGatewayProxyResponse> UpdateStudyStatusAutoAsync(string? body)
+    {
+        var req = Parse<UpdateStudyStatusRequest>(body);
+        if (req == null || req.StudyId <= 0)
+            return FunctionBase.BadRequest("StudyId is required.");
+
+        try
+        {
+            await using var conn = await OpenAsync();
+
+            // 1. Get current study type + delete flag
+            string currentType = string.Empty;
+            int    deleteFlag  = 0;
+            await using (var infoCmd = new MySqlConnector.MySqlCommand(
+                "SELECT type, `delete` FROM tran_typewordlist WHERE id = @id", conn))
+            {
+                infoCmd.Parameters.AddWithValue("@id", req.StudyId);
+                await using var rd = await infoCmd.ExecuteReaderAsync();
+                if (await rd.ReadAsync())
+                {
+                    currentType = rd.IsDBNull(0) ? string.Empty : rd.GetString(0);
+                    deleteFlag  = rd.IsDBNull(1) ? 0 : rd.GetInt32(1);
+                }
+            }
+
+            // 2. Check for audio attachment
+            bool hasAudio = false;
+            await using (var audioCmd = new MySqlConnector.MySqlCommand(
+                "SELECT COUNT(*) FROM tran_attachment WHERE exam_id = @id AND attachment_type = 'Audio File'", conn))
+            {
+                audioCmd.Parameters.AddWithValue("@id", req.StudyId);
+                var cnt = await audioCmd.ExecuteScalarAsync();
+                hasAudio = Convert.ToInt64(cnt) > 0;
+            }
+
+            // 3. Apply business rules (mirrors Laravel StudyController@updateStatus)
+            string newType    = string.Empty;
+            string message    = string.Empty;
+            var    t          = currentType.ToLower().Trim();
+
+            if (t == "rad final report")
+            {
+                // For rad final report we auto-route back into workflow
+                newType = hasAudio ? "trans new messages" : "new study";
+                message = hasAudio
+                    ? $"Study [#{req.StudyId}] sent to transcription (audio attached)."
+                    : $"Study [#{req.StudyId}] reset to new study.";
+            }
+            else if (t == "cancel exam")
+            {
+                newType = hasAudio ? "trans new messages" : "new study";
+                message = hasAudio
+                    ? $"Study [#{req.StudyId}] sent to transcription (audio attached)."
+                    : $"Study [#{req.StudyId}] reset to new study.";
+            }
+            else
+            {
+                // Other statuses: nothing to auto-advance — return message
+                return FunctionBase.Ok(new { message = $"No auto-advance rule for status '{currentType}'." }, "No change needed.");
+            }
+
+            // 4. Apply update — set new type + reset delete=0
+            await using (var updCmd = new MySqlConnector.MySqlCommand(
+                "UPDATE tran_typewordlist SET type = @type, `delete` = 0 WHERE id = @id", conn))
+            {
+                updCmd.Parameters.AddWithValue("@type", newType);
+                updCmd.Parameters.AddWithValue("@id",   req.StudyId);
+                await updCmd.ExecuteNonQueryAsync();
+            }
+
+            return FunctionBase.Ok(new { newStatus = newType, message }, "Status auto-updated.");
+        }
+        catch (Exception ex) { return Err("UpdateStudyStatusAuto", ex); }
+    }
+
     public async Task<APIGatewayProxyResponse> UpdateStudyAsync(string? body)
     {
         var req = Parse<UpdateStudyRequest>(body);
@@ -138,10 +228,49 @@ public class StudiesHelper : HelperBase
 
         try
         {
+            // ── Laravel-matching report_text logic ─────────────────────────────
+            string? reportText      = req.ReportText;
+            string? impressionText  = null;
+            string? autoStatus      = null;
+
+            if (!string.IsNullOrWhiteSpace(reportText))
+            {
+                // 1. Sanitize quotes (matches Laravel str_replace)
+                reportText = reportText.Replace("'", "`").Replace("&#39;", "&#96;");
+
+                // 2. Split impression — everything after last "Impression" keyword
+                var impIdx = reportText.LastIndexOf("Impression", StringComparison.OrdinalIgnoreCase);
+                if (impIdx >= 0)
+                {
+                    impressionText = "IMPRESSION" + reportText.Substring(impIdx + "Impression".Length);
+                    reportText     = reportText.Substring(0, impIdx) + " Impression ";
+                }
+                else
+                {
+                    impressionText = string.Empty;
+                }
+
+                // 3. Auto-advance status: trans new messages → trans reports on hold
+                //    (only if the study currently has an empty report_text)
+                await using var connCheck = await OpenAsync();
+                await using var chkCmd    = QueryHelper.GetStudyCurrentReportText(connCheck, req.StudyId);
+                await using var chkReader = await chkCmd.ExecuteReaderAsync();
+                if (await chkReader.ReadAsync())
+                {
+                    var existingReport = chkReader.IsDBNull(0) ? "" : chkReader.GetString(0);
+                    var currentType    = chkReader.IsDBNull(1) ? "" : chkReader.GetString(1);
+                    if (existingReport == "" && currentType == "trans new messages")
+                        autoStatus = "trans reports on hold";
+                }
+            }
+
             await using var conn = await OpenAsync();
             await using var cmd  = QueryHelper.UpdateStudy(conn, req.StudyId,
-                req.PatientName, req.PatientDob, req.Dos, req.Modality,
-                req.Description, req.Status, req.TranscriberId, req.RadId, req.TemplateId);
+                req.PatientName, req.PatientFirstName, req.PatientLastName,
+                req.PatientId, req.PatientDob, req.Dos, req.Modality,
+                req.Description, req.OrderingPhysician, req.AccessionNumber,
+                req.Status ?? autoStatus, req.TranscriberId, req.RadId, req.TemplateId, req.ClientId,
+                reportText, impressionText);
             await cmd.ExecuteNonQueryAsync();
             return FunctionBase.Ok(null, "Study updated.");
         }
@@ -240,6 +369,25 @@ public class StudiesHelper : HelperBase
         catch (Exception ex) { return Err("MarkStat", ex); }
     }
 
+    public async Task<APIGatewayProxyResponse> UnmarkStatAsync(string? body)
+    {
+        var req = Parse<MarkStatRequest>(body);
+        if (req == null || req.StudyIds.Count == 0)
+            return FunctionBase.BadRequest("StudyIds list is required.");
+        if (req.StudyIds.Any(id => id <= 0))
+            return FunctionBase.BadRequest("All StudyIds must be positive integers.");
+
+        try
+        {
+            var idParams = string.Join(",", req.StudyIds);
+            await using var conn = await OpenAsync();
+            await using var cmd  = QueryHelper.UnmarkStudiesStat(conn, idParams);
+            await cmd.ExecuteNonQueryAsync();
+            return FunctionBase.Ok(null, "STAT removed from studies.");
+        }
+        catch (Exception ex) { return Err("UnmarkStat", ex); }
+    }
+
     public async Task<APIGatewayProxyResponse> CloneStudyAsync(string? body)
     {
         var req = Parse<CloneStudyRequest>(body);
@@ -283,7 +431,9 @@ public class StudiesHelper : HelperBase
     private static readonly string S3Bucket =
         Environment.GetEnvironmentVariable("S3_BUCKET")
         ?? Environment.GetEnvironmentVariable("AWS_BUCKET")
-        ?? "rispacs-static-content";
+        ?? "pacsmst";
+
+    private static readonly string S3AudioBucket = S3Bucket;
 
     // Reads S3 object and returns data URI string (base64), same as Laravel's Storage::get() + base64_encode()
     // Falls back through "ris/", "images/", and "php/template/" prefixes if direct key not found.
@@ -486,7 +636,7 @@ public class StudiesHelper : HelperBase
         try
         {
             await using var conn   = await OpenAsync();
-            await using var cmd    = QueryHelper.GetAttachedFiles(conn, req.StudyId, "audio");
+            await using var cmd    = QueryHelper.GetAttachedFiles(conn, req.StudyId, "Audio File");
             await using var reader = await cmd.ExecuteReaderAsync();
             var files = new List<AttachmentResponse>();
             while (await reader.ReadAsync())
@@ -499,6 +649,110 @@ public class StudiesHelper : HelperBase
             return FunctionBase.Ok(new { hasAudio = files.Count > 0, files });
         }
         catch (Exception ex) { return Err("CheckForDownloadAudio", ex); }
+    }
+
+    // ── Download Audio ZIP ────────────────────────────────────────────────────
+    // Accepts { studyIds: [1,2,3], orderNumbers: {"1":"564830","2":"503469"} }
+    // Fetches all audio files per study, zips them into per-study folders,
+    // uploads the ZIP to S3 temp/ and returns a presigned download URL.
+    public async Task<APIGatewayProxyResponse> DownloadAudioZipAsync(string? body)
+    {
+        var req = Parse<DownloadAudioZipRequest>(body);
+        if (req == null || req.StudyIds == null || req.StudyIds.Count == 0)
+            return FunctionBase.BadRequest("studyIds is required.");
+
+        try
+        {
+            using var s3  = new AmazonS3Client();
+            using var ms  = new System.IO.MemoryStream();
+            using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+            {
+                await using var conn = await OpenAsync();
+
+                foreach (var studyId in req.StudyIds)
+                {
+                    req.OrderNumbers.TryGetValue(studyId.ToString(), out var orderNum);
+                    var folderName = string.IsNullOrWhiteSpace(orderNum) ? studyId.ToString() : orderNum;
+
+                    await using var cmd    = QueryHelper.GetAttachedFiles(conn, studyId, "Audio File");
+                    await using var reader = await cmd.ExecuteReaderAsync();
+                    var paths = new List<string>();
+                    while (await reader.ReadAsync())
+                    {
+                        var fp = Str(reader, "file_path");
+                        if (!string.IsNullOrWhiteSpace(fp)) paths.Add(fp);
+                    }
+
+                    foreach (var filePath in paths)
+                    {
+                        var cleanKey = filePath.TrimStart('/');
+                        // resolve key (direct or ris/ prefix)
+                        string? resolvedKey = null;
+                        foreach (var candidate in new[] { cleanKey, "ris/" + cleanKey })
+                        {
+                            if (await S3KeyExistsAsync(s3, candidate)) { resolvedKey = candidate; break; }
+                        }
+                        if (resolvedKey == null) continue;
+
+                        try
+                        {
+                            var getReq = new Amazon.S3.Model.GetObjectRequest { BucketName = S3Bucket, Key = resolvedKey };
+                            using var getResp = await s3.GetObjectAsync(getReq);
+                            var fileName = System.IO.Path.GetFileName(resolvedKey);
+                            var entry    = zip.CreateEntry($"{folderName}/{fileName}", System.IO.Compression.CompressionLevel.Fastest);
+                            await using var entryStream = entry.Open();
+                            await getResp.ResponseStream.CopyToAsync(entryStream);
+                        }
+                        catch (Exception ex) { Console.WriteLine($"[DownloadAudioZip] Skip file {filePath}: {ex.Message}"); }
+                    }
+                }
+            }
+
+            ms.Position = 0;
+            if (ms.Length == 0)
+                return FunctionBase.BadRequest("No audio files found for the requested studies.");
+
+            // Upload ZIP to S3 temp/ prefix
+            var zipKey  = $"temp/audio_zip/{Guid.NewGuid()}.zip";
+            var putReq  = new Amazon.S3.Model.PutObjectRequest
+            {
+                BucketName  = S3Bucket,
+                Key         = zipKey,
+                InputStream = ms,
+                ContentType = "application/zip",
+            };
+            await s3.PutObjectAsync(putReq);
+
+            // Generate presigned URL (30 min)
+            var presigned = s3.GetPreSignedURL(new GetPreSignedUrlRequest
+            {
+                BucketName = S3Bucket,
+                Key        = zipKey,
+                Expires    = DateTime.UtcNow.AddMinutes(30),
+                Verb       = HttpVerb.GET,
+            });
+
+            return FunctionBase.Ok(new { zipUrl = presigned, zipKey });
+        }
+        catch (Exception ex) { return Err("DownloadAudioZip", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> DeleteTempZipAsync(string? body)
+    {
+        var req = Parse<DeleteTempZipRequest>(body);
+        if (req == null || string.IsNullOrWhiteSpace(req.ZipKey))
+            return FunctionBase.BadRequest("zipKey is required.");
+        try
+        {
+            // Safety: only allow deleting under temp/ prefix
+            var key = req.ZipKey.TrimStart('/');
+            if (!key.StartsWith("temp/"))
+                return FunctionBase.BadRequest("Invalid key — only temp/ files can be deleted.");
+            using var s3 = new AmazonS3Client();
+            await s3.DeleteObjectAsync(new Amazon.S3.Model.DeleteObjectRequest { BucketName = S3Bucket, Key = key });
+            return FunctionBase.Ok(null, "Temp ZIP deleted.");
+        }
+        catch (Exception ex) { return Err("DeleteTempZip", ex); }
     }
 
     public async Task<APIGatewayProxyResponse> GetStudyDocumentAsync(string? body)
@@ -537,15 +791,19 @@ public class StudiesHelper : HelperBase
         try
         {
             await using var conn   = await OpenAsync();
-            await using var cmd    = QueryHelper.GetStudyAudit(conn, req.StudyId);
+            await using var cmd    = QueryHelper.GetPatientExamHistory(conn, req.StudyId);
             await using var reader = await cmd.ExecuteReaderAsync();
-            var history = new List<AuditResponse>();
+            var history = new List<object>();
             while (await reader.ReadAsync())
-                history.Add(new AuditResponse
+                history.Add(new
                 {
-                    Id = reader.GetInt32("id"), StudyId = req.StudyId,
-                    Action = Str(reader, "action"), Description = Str(reader, "description"),
-                    Username = Str(reader, "username"), CreatedAt = DateStr(reader, "created_at")
+                    id       = reader.GetInt32("id"),
+                    modality = Str(reader, "modality"),
+                    exam     = Str(reader, "exam"),
+                    dos      = DateStr(reader, "dos"),
+                    status   = Str(reader, "status"),
+                    pdfPath  = Str(reader, "pdf_path"),
+                    radName  = Str(reader, "rad_name"),
                 });
             return FunctionBase.Ok(history);
         }
@@ -576,7 +834,8 @@ public class StudiesHelper : HelperBase
             while (await reader.ReadAsync())
                 notes.Add(new NoteResponse
                 {
-                    Id = reader.GetInt32("id"), Username = Str(reader, "username"),
+                    Id = reader.GetInt32("id"), UserId = SafeInt(reader, "userid") ?? 0,
+                    Username = Str(reader, "username"),
                     Notes = Str(reader, "notes"), Date = DateStr(reader, "created_at")
                 });
             return FunctionBase.Ok(notes);
@@ -678,6 +937,61 @@ public class StudiesHelper : HelperBase
             return Task.FromResult(FunctionBase.Ok(new { url }));
         }
         catch (Exception ex) { return Task.FromResult(Err("GetPresignedUrl", ex)); }
+    }
+
+    public Task<APIGatewayProxyResponse> GetPresignedUploadUrlAsync(string? body)
+    {
+        try
+        {
+            var req = Parse<GetPresignedUploadUrlRequest>(body);
+            if (req == null || req.StudyId <= 0 || string.IsNullOrWhiteSpace(req.FileName))
+                return Task.FromResult(FunctionBase.BadRequest("StudyId and FileName are required."));
+
+            var key = $"attachments/{req.StudyId}/{req.FileName}";
+            using var s3 = new AmazonS3Client();
+            var urlReq   = new Amazon.S3.Model.GetPreSignedUrlRequest
+            {
+                BucketName  = S3Bucket,
+                Key         = key,
+                Expires     = DateTime.UtcNow.AddMinutes(15),
+                Verb        = Amazon.S3.HttpVerb.PUT,
+                ContentType = req.ContentType,
+            };
+            var uploadUrl = s3.GetPreSignedURL(urlReq);
+            return Task.FromResult(FunctionBase.Ok(new { uploadUrl, filePath = key }));
+        }
+        catch (Exception ex) { return Task.FromResult(Err("GetPresignedUploadUrl", ex)); }
+    }
+
+    public async Task<APIGatewayProxyResponse> UploadAudioAttachmentAsync(string? body)
+    {
+        try
+        {
+            var req = Parse<UploadAudioAttachmentRequest>(body);
+            if (req == null || req.StudyId <= 0 || string.IsNullOrWhiteSpace(req.FileName) || string.IsNullOrWhiteSpace(req.Data))
+                return FunctionBase.BadRequest("StudyId, FileName and Data are required.");
+
+            var bytes   = Convert.FromBase64String(req.Data);
+            var key     = $"attachments/{req.StudyId}/{req.FileName}";
+
+            using var s3     = new AmazonS3Client();
+            using var stream = new System.IO.MemoryStream(bytes);
+            var putReq = new Amazon.S3.Model.PutObjectRequest
+            {
+                BucketName  = S3AudioBucket,
+                Key         = key,
+                InputStream = stream,
+                ContentType = "audio/wav",
+            };
+            await s3.PutObjectAsync(putReq);
+
+            await using var conn = await OpenAsync();
+            await using var cmd  = QueryHelper.InsertAttachment(conn, req.StudyId, req.FileName, key, "Audio File");
+            await cmd.ExecuteNonQueryAsync();
+
+            return FunctionBase.Ok(new { filePath = key }, "Audio uploaded.");
+        }
+        catch (Exception ex) { return Err("UploadAudioAttachment", ex); }
     }
 
     public async Task<APIGatewayProxyResponse> GetViewerTokenAsync(string? body)

@@ -456,7 +456,7 @@ public class AdminHelper : HelperBase
             if (req.StudyId.HasValue && req.StudyId > 0)
             {
                 await using var cmd = QueryHelper.UpdateStudy(conn, req.StudyId.Value,
-                    patientName, req.Dob, req.Dos, req.Modality, req.Description, null, null, null, null);
+                    patientName, null, null, null, req.Dob, req.Dos, req.Modality, req.Description, null, null, null, null, null, null, null);
                 await cmd.ExecuteNonQueryAsync();
                 return FunctionBase.Ok(new { studyId = req.StudyId }, "Non-DICOM entry updated.");
             }
