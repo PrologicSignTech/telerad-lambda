@@ -138,6 +138,7 @@ public abstract class HelperBase
             RadId             = SafeInt(r, "rad_id"),
             TranscriberId     = SafeInt(r, "transcriber_id"),
             IsStat            = SafeInt(r, "is_stat") == 1,
+            DicomReceived     = StrOpt(r, "dicom_received") ?? string.Empty,
             Dod               = SafeDateStr(r, "dod"),
             Dot               = SafeDateStr(r, "dot"),
             CreatedAt         = SafeDateStr(r, "created_at"),

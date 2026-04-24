@@ -66,6 +66,7 @@ public class StudyResponse
     public bool IsStat { get; set; }
     public bool DictationReceived { get; set; }
     public int AttachedDocuments { get; set; }
+    public string DicomReceived { get; set; } = string.Empty;
     public string Dot { get; set; } = string.Empty;
     public string Dod { get; set; } = string.Empty;
     public string CreatedAt { get; set; } = string.Empty;

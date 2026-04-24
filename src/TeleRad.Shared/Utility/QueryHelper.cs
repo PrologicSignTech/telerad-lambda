@@ -80,15 +80,24 @@ public static class QueryHelper
     {
         var cmd = new MySqlCommand { Connection = c };
         var sql = @"
-            SELECT s.id, CAST(s.id AS CHAR) AS order_number, s.pname AS patient_name, s.dob AS patient_dob,
+            SELECT s.id, CAST(s.id AS CHAR) AS order_number,
+                   s.pname      AS patient_name,
+                   s.firstname  AS patient_first_name,
+                   s.lastname   AS patient_last_name,
+                   s.idnumber   AS patient_id,
+                   s.dob        AS patient_dob,
                    s.access_number AS accession_number,
                    s.modality, s.type AS status, s.dos,
+                   s.description AS exam,
+                   s.ordering_physician,
+                   s.dicom_received,
+                   s.sid,
                    ref_u.displayname AS client_name, s.ref_id, s.rad_id,
                    s.trans_id AS transcriber_id, s.templateid AS template_id,
                    s.stat AS is_stat, s.report_date AS updated_at,
                    r.displayname AS rad_name, t.displayname AS transcriber_name,
                    (SELECT COUNT(*) FROM tran_attachment a
-                    WHERE a.exam_id = s.id AND a.attachment_type = 'audio') AS dictation_received,
+                    WHERE a.exam_id = s.id AND a.attachment_type = 'Audio File') AS dictation_received,
                    (SELECT COUNT(*) FROM tran_attachment a2
                     WHERE a2.exam_id = s.id) AS attached_documents
             FROM tran_typewordlist s
