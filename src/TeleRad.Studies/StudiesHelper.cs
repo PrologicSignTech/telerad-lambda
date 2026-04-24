@@ -313,7 +313,7 @@ public class StudiesHelper : HelperBase
                 status            = Str(reader, "status"),
                 reportText        = Str(reader, "report_text"),
                 impressionText    = Str(reader, "impression_text"),
-                reportKeyImage    = Str(reader, "report_key_image"),
+                reportKeyImage    = PresignKeyImages(Str(reader, "report_key_image")),
                 isAddendum        = !reader.IsDBNull(reader.GetOrdinal("is_addendum")) && reader.GetInt32("is_addendum") == 1,
                 pdfReport         = Str(reader, "pdf_report"),
                 pdfPresignedUrl   = GeneratePresignedUrl(Str(reader, "pdf_report")),
@@ -501,6 +501,24 @@ public class StudiesHelper : HelperBase
         {
             return false;
         }
+    }
+
+    // Presigns each file_path in a JSON array of key images: [{file_path,presignedUrl}]
+    private static string PresignKeyImages(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return json;
+        try
+        {
+            var items = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<System.Text.Json.JsonElement>>(json);
+            if (items == null) return json;
+            var result = items.Select(el =>
+            {
+                var fp = el.TryGetProperty("file_path", out var p) ? p.GetString() ?? "" : "";
+                return new { file_path = fp, presignedUrl = GeneratePresignedUrl(fp) ?? "" };
+            });
+            return System.Text.Json.JsonSerializer.Serialize(result);
+        }
+        catch { return json; }
     }
 
     // Generates a 30-min presigned URL.
@@ -768,19 +786,88 @@ public class StudiesHelper : HelperBase
             await using var reader = await cmd.ExecuteReaderAsync();
             var docs = new List<AttachmentResponse>();
             while (await reader.ReadAsync())
+            {
+                var rawPath = Str(reader, "file_path");
                 docs.Add(new AttachmentResponse
                 {
-                    Id = reader.GetInt32("id"), StudyId = req.StudyId,
-                    FileName = Str(reader, "file_name"), FileType = Str(reader, "type"),
-                    FilePath = Str(reader, "file_path"), CreatedAt = DateStr(reader, "created_at")
+                    Id        = reader.GetInt32("id"),
+                    StudyId   = req.StudyId,
+                    FileName  = Str(reader, "file_name"),
+                    FileType  = Str(reader, "type"),
+                    FilePath  = PresignedUrl(rawPath),   // presign S3 key → temp URL
+                    CreatedAt = DateStr(reader, "created_at")
                 });
+            }
             return FunctionBase.Ok(docs);
         }
         catch (Exception ex) { return Err("GetStudyDocument", ex); }
     }
 
     public async Task<APIGatewayProxyResponse> GetVerificationSheetAsync(string? body)
-        => await GetStudyDocumentAsync(body);
+    {
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0)
+            return FunctionBase.BadRequest("StudyId is required.");
+
+        try
+        {
+            await using var conn = await OpenAsync();
+
+            // Step 1: get the referrer (client) username for this study
+            await using var usernameCmd = new MySqlConnector.MySqlCommand(
+                @"SELECT u.username
+                  FROM tran_typewordlist s
+                  JOIN tran_user u ON u.id = s.ref_id
+                  WHERE s.id = @sid
+                  LIMIT 1", conn);
+            usernameCmd.Parameters.AddWithValue("@sid", req.StudyId);
+            var clientUsername = (await usernameCmd.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(clientUsername))
+                return FunctionBase.Ok(Array.Empty<object>());
+
+            // Step 2: get inbound faxes for that client (mirrors Laravel getFolderItems)
+            await using var faxCmd = QueryHelper.GetIncomingFaxesByClient(conn, clientUsername);
+            await using var reader = await faxCmd.ExecuteReaderAsync();
+
+            // Collect rows first (reader must be closed before we use S3)
+            var rows = new List<(int? id, string rawPath, string createdAt)>();
+            while (await reader.ReadAsync())
+                rows.Add((SafeInt(reader, "id"), Str(reader, "file_name"), SafeDateStr(reader, "created_at")));
+
+            // Step 3: check existence on S3 and only presign files that actually exist
+            using var s3 = new Amazon.S3.AmazonS3Client();
+            var bucket   = Environment.GetEnvironmentVariable("S3_BUCKET")
+                        ?? Environment.GetEnvironmentVariable("AWS_BUCKET")
+                        ?? "rispacs-static-content";
+            var docs = new List<object>();
+            foreach (var (id, rawPath, createdAt) in rows)
+            {
+                if (string.IsNullOrWhiteSpace(rawPath)) continue;
+                var cleanKey = rawPath.TrimStart('/');
+                bool exists;
+                try
+                {
+                    await s3.GetObjectMetadataAsync(bucket, cleanKey);
+                    exists = true;
+                }
+                catch (Amazon.S3.AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    exists = false;
+                }
+                docs.Add(new
+                {
+                    id,
+                    fileName  = System.IO.Path.GetFileName(rawPath),
+                    filePath  = exists ? PresignedUrl(rawPath) : string.Empty,
+                    exists,
+                    createdAt,
+                });
+            }
+            return FunctionBase.Ok(docs);
+        }
+        catch (Exception ex) { return Err("GetVerificationSheet", ex); }
+    }
 
     public async Task<APIGatewayProxyResponse> GetExamHistoryAsync(string? body)
     {
@@ -992,6 +1079,116 @@ public class StudiesHelper : HelperBase
             return FunctionBase.Ok(new { filePath = key }, "Audio uploaded.");
         }
         catch (Exception ex) { return Err("UploadAudioAttachment", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> AddKeyImageAsync(string? body)
+    {
+        try
+        {
+            var req = Parse<AddKeyImageRequest>(body);
+            if (req == null || req.StudyId <= 0 || string.IsNullOrWhiteSpace(req.FileName) || string.IsNullOrWhiteSpace(req.Data))
+                return FunctionBase.BadRequest("StudyId, FileName and Data are required.");
+
+            // 1. Decode and upload image to S3
+            var bytes  = Convert.FromBase64String(req.Data);
+            var key    = $"key_images/{req.StudyId}/{req.FileName}";
+            using var s3 = new AmazonS3Client();
+            using var stream = new System.IO.MemoryStream(bytes);
+            await s3.PutObjectAsync(new Amazon.S3.Model.PutObjectRequest
+            {
+                BucketName  = S3Bucket,
+                Key         = key,
+                InputStream = stream,
+                ContentType = req.ContentType,
+            });
+
+            // 2. Load existing key images JSON array from DB
+            await using var connRead = await OpenAsync();
+            await using var cmdRead  = new MySqlCommand("SELECT report_key_image FROM tran_typewordlist WHERE id = @id LIMIT 1", connRead);
+            cmdRead.Parameters.AddWithValue("@id", req.StudyId);
+            await using var reader = await cmdRead.ExecuteReaderAsync();
+            var existing = "";
+            if (await reader.ReadAsync()) existing = reader.IsDBNull(0) ? "" : reader.GetString(0);
+            await reader.CloseAsync();
+
+            // 3. Append new entry (mirrors Laravel: [{file_path: "..."}])
+            var images = new System.Collections.Generic.List<object>();
+            if (!string.IsNullOrWhiteSpace(existing))
+            {
+                try
+                {
+                    var parsed = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<System.Text.Json.JsonElement>>(existing);
+                    if (parsed != null)
+                        foreach (var el in parsed)
+                            images.Add(new { file_path = el.GetProperty("file_path").GetString() ?? "" });
+                }
+                catch { /* malformed JSON — start fresh */ }
+            }
+            if (images.Count >= 3)
+                return FunctionBase.BadRequest("Maximum 3 key images allowed.");
+            images.Add(new { file_path = key });
+
+            var newJson = System.Text.Json.JsonSerializer.Serialize(images);
+
+            // 4. Save updated JSON back to DB
+            await using var connWrite = await OpenAsync();
+            await using var cmdWrite  = new MySqlCommand("UPDATE tran_typewordlist SET report_key_image = @ki WHERE id = @id", connWrite);
+            cmdWrite.Parameters.AddWithValue("@ki", newJson);
+            cmdWrite.Parameters.AddWithValue("@id", req.StudyId);
+            await cmdWrite.ExecuteNonQueryAsync();
+
+            // 5. Return presigned URL for the new image
+            var presignedUrl = GeneratePresignedUrl(key);
+            return FunctionBase.Ok(new { filePath = key, presignedUrl }, "Key image added.");
+        }
+        catch (Exception ex) { return Err("AddKeyImage", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> DeleteKeyImageAsync(string? body)
+    {
+        try
+        {
+            var req = Parse<DeleteKeyImageRequest>(body);
+            if (req == null || req.StudyId <= 0 || string.IsNullOrWhiteSpace(req.FilePath))
+                return FunctionBase.BadRequest("StudyId and FilePath are required.");
+
+            // 1. Load existing JSON
+            await using var connRead = await OpenAsync();
+            await using var cmdRead  = new MySqlCommand("SELECT report_key_image FROM tran_typewordlist WHERE id = @id LIMIT 1", connRead);
+            cmdRead.Parameters.AddWithValue("@id", req.StudyId);
+            await using var reader = await cmdRead.ExecuteReaderAsync();
+            var existing = "";
+            if (await reader.ReadAsync()) existing = reader.IsDBNull(0) ? "" : reader.GetString(0);
+            await reader.CloseAsync();
+
+            // 2. Remove the entry
+            var images = new System.Collections.Generic.List<object>();
+            if (!string.IsNullOrWhiteSpace(existing))
+            {
+                try
+                {
+                    var parsed = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<System.Text.Json.JsonElement>>(existing);
+                    if (parsed != null)
+                        foreach (var el in parsed)
+                        {
+                            var fp = el.GetProperty("file_path").GetString() ?? "";
+                            if (fp != req.FilePath) images.Add(new { file_path = fp });
+                        }
+                }
+                catch { }
+            }
+            var newJson = images.Count > 0 ? System.Text.Json.JsonSerializer.Serialize(images) : "";
+
+            // 3. Save
+            await using var connWrite = await OpenAsync();
+            await using var cmdWrite  = new MySqlCommand("UPDATE tran_typewordlist SET report_key_image = @ki WHERE id = @id", connWrite);
+            cmdWrite.Parameters.AddWithValue("@ki", newJson);
+            cmdWrite.Parameters.AddWithValue("@id", req.StudyId);
+            await cmdWrite.ExecuteNonQueryAsync();
+
+            return FunctionBase.Ok(null, "Key image deleted.");
+        }
+        catch (Exception ex) { return Err("DeleteKeyImage", ex); }
     }
 
     public async Task<APIGatewayProxyResponse> GetViewerTokenAsync(string? body)

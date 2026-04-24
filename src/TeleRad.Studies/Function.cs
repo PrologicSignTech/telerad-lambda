@@ -87,6 +87,8 @@ public class Function
                 TriggerHelper.GetPresignedUrl               => await helper.GetPresignedUrlAsync(wrapper.Body),
                 TriggerHelper.GetPresignedUploadUrl         => await helper.GetPresignedUploadUrlAsync(wrapper.Body),
                 TriggerHelper.UploadAudioAttachment         => await helper.UploadAudioAttachmentAsync(wrapper.Body),
+                TriggerHelper.AddKeyImage                   => await helper.AddKeyImageAsync(wrapper.Body),
+                TriggerHelper.DeleteKeyImage                => await helper.DeleteKeyImageAsync(wrapper.Body),
 
                 TriggerHelper.GetViewerToken                => await helper.GetViewerTokenAsync(wrapper.Body),
                 TriggerHelper.GetIncomingFaxes              => await helper.GetIncomingFaxesAsync(wrapper.Body),

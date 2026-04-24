@@ -442,7 +442,7 @@ public static class QueryHelper
         var sql = @"
             SELECT t.id, t.temp_name AS name, t.heading_text AS body_text,
                    '' AS modality,
-                   t.userid AS user_id, u.displayname AS user_name,
+                   CAST(t.userid AS UNSIGNED) AS user_id, u.displayname AS user_name,
                    '' AS created_at
             FROM tran_template t
             LEFT JOIN tran_user u ON u.id = CAST(t.userid AS UNSIGNED)
@@ -1489,29 +1489,47 @@ public static class QueryHelper
     // ORDER STATUS
     // ══════════════════════════════════════════════════════════════════════════
 
-    public static MySqlCommand GetOrderStatus(MySqlConnection c, string? search, string? df, string? dt, int offset, int perPage)
+    public static MySqlCommand GetOrderStatus(MySqlConnection c,
+        string? search, string? df, string? dt, int offset, int perPage,
+        string? orderNo = null, string? firstName = null, string? lastName = null,
+        string? client = null, string? idNumber = null, string? accNumber = null,
+        string? modality = null, string? exam = null, string? reportText = null, string? status = null)
     {
         var cmd = new MySqlCommand { Connection = c };
-        // Matches Laravel getOrderStatusv2: LEFT JOINs tran_audit for DOT/DOD time, no delete filter
         var sql = @"
-            SELECT s.id, s.pname AS patient_name, s.access_number AS accession_number,
-                   s.modality, s.type AS status, s.dos, s.dob, s.idnumber, s.sid,
-                   s.report_date, s.pdf_report, s.incoming_order_exam_id, s.incoming_order_patient_id,
-                   s.`delete` AS is_deleted,
+            SELECT s.id, s.pname AS patient_name, s.firstname, s.lastname,
+                   s.access_number AS accession_number,
+                   s.modality, s.type AS status, DATE_FORMAT(s.dos, '%Y-%m-%d') AS dos, DATE_FORMAT(s.dob, '%Y-%m-%d') AS dob, s.idnumber, s.sid,
+                   s.description AS exam, s.report_text,
+                   s.report_date, s.pdf_report, s.`delete` AS is_deleted,
                    ref_u.displayname AS client_name,
                    t.displayname AS transcriber_name, r.displayname AS rad_name,
-                   DATE_FORMAT(ta1.curr_date_time, '%m-%d-%Y') AS dot_time,
-                   DATE_FORMAT(ta2.curr_date_time, '%m-%d-%Y') AS dod_time
+                   (SELECT DATE_FORMAT(a.curr_date_time, '%m/%d/%Y %H:%i')
+                      FROM tran_audit a WHERE a.eid = s.id AND a.status_insert = 'DOT Time'
+                      ORDER BY a.id DESC LIMIT 1) AS dot_time,
+                   (SELECT DATE_FORMAT(a.curr_date_time, '%m/%d/%Y %H:%i')
+                      FROM tran_audit a WHERE a.eid = s.id AND a.status_insert = 'DOD Time'
+                      ORDER BY a.id DESC LIMIT 1) AS dod_time
             FROM tran_typewordlist s
             LEFT JOIN tran_user t     ON t.id = s.trans_id
             LEFT JOIN tran_user r     ON r.id = s.rad_id
             LEFT JOIN tran_user ref_u ON ref_u.id = s.ref_id
-            LEFT JOIN tran_audit ta1  ON ta1.eid = s.id AND ta1.status_insert = 'DOT Time'
-            LEFT JOIN tran_audit ta2  ON ta2.eid = s.id AND ta2.status_insert = 'DOD Time'
             WHERE 1=1";
-        if (!string.IsNullOrEmpty(search)) { sql += " AND (s.pname LIKE @s OR s.access_number LIKE @s OR s.idnumber LIKE @s)"; cmd.Parameters.AddWithValue("@s", $"%{search}%"); }
-        if (!string.IsNullOrEmpty(df))     { sql += " AND DATE(s.dos) >= @df"; cmd.Parameters.AddWithValue("@df", df); }
-        if (!string.IsNullOrEmpty(dt))     { sql += " AND DATE(s.dos) <= @dt"; cmd.Parameters.AddWithValue("@dt", dt); }
+        // Global search
+        if (!string.IsNullOrEmpty(search))    { sql += " AND (s.pname LIKE @s OR s.access_number LIKE @s OR s.idnumber LIKE @s OR s.firstname LIKE @s OR s.lastname LIKE @s)"; cmd.Parameters.AddWithValue("@s", $"%{search}%"); }
+        // Column filters (match Laravel)
+        if (!string.IsNullOrEmpty(orderNo))   { sql += " AND CAST(s.id AS CHAR) = @ono";        cmd.Parameters.AddWithValue("@ono",  orderNo.Trim()); }
+        if (!string.IsNullOrEmpty(firstName)) { sql += " AND s.firstname LIKE @fn";             cmd.Parameters.AddWithValue("@fn",   $"%{firstName}%"); }
+        if (!string.IsNullOrEmpty(lastName))  { sql += " AND s.lastname LIKE @ln";              cmd.Parameters.AddWithValue("@ln",   $"%{lastName}%"); }
+        if (!string.IsNullOrEmpty(client))    { sql += " AND ref_u.displayname LIKE @cl";       cmd.Parameters.AddWithValue("@cl",   $"%{client}%"); }
+        if (!string.IsNullOrEmpty(idNumber))  { sql += " AND s.idnumber LIKE @idn";             cmd.Parameters.AddWithValue("@idn",  $"%{idNumber}%"); }
+        if (!string.IsNullOrEmpty(accNumber)) { sql += " AND s.access_number LIKE @acc";        cmd.Parameters.AddWithValue("@acc",  $"%{accNumber}%"); }
+        if (!string.IsNullOrEmpty(modality))  { sql += " AND s.modality LIKE @mod";             cmd.Parameters.AddWithValue("@mod",  $"%{modality}%"); }
+        if (!string.IsNullOrEmpty(exam))      { sql += " AND s.description LIKE @exam";         cmd.Parameters.AddWithValue("@exam", $"%{exam}%"); }
+        if (!string.IsNullOrEmpty(reportText)){ sql += " AND s.report_text LIKE @rt";           cmd.Parameters.AddWithValue("@rt",   $"%{reportText}%"); }
+        if (!string.IsNullOrEmpty(status))    { sql += " AND s.type = @st";                     cmd.Parameters.AddWithValue("@st",   status); }
+        if (!string.IsNullOrEmpty(df))        { sql += " AND DATE(s.dos) >= @df";               cmd.Parameters.AddWithValue("@df",   df); }
+        if (!string.IsNullOrEmpty(dt))        { sql += " AND DATE(s.dos) <= @dt";               cmd.Parameters.AddWithValue("@dt",   dt); }
         sql += " ORDER BY s.id DESC LIMIT @limit OFFSET @offset";
         cmd.Parameters.AddWithValue("@limit", perPage);
         cmd.Parameters.AddWithValue("@offset", offset);

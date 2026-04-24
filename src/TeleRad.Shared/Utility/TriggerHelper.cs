@@ -77,6 +77,10 @@ public static class TriggerHelper
     public const string GetPresignedUploadUrl        = "getPresignedUploadUrl";
     public const string UploadAudioAttachment        = "uploadAudioAttachment";
     public const string SendAudioFiles               = "sendAudioFiles";
+    public const string AddKeyImage                  = "addKeyImage";
+    public const string DeleteKeyImage               = "deleteKeyImage";
+    public const string MarkAsNewStudy               = "markAsNewStudy";
+    public const string RestoreStudy                 = "restoreStudy";
     public const string GetSentAudioFiles            = "getSentAudioFiles";
 
     // ── Audit ─────────────────────────────────────────────────────────────────

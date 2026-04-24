@@ -234,17 +234,26 @@ public class ModalityPriceResponse
 // ── Order Status ──────────────────────────────────────────────────────────────
 public class OrderStatusResponse
 {
-    public int Id { get; set; }
-    public string PatientName { get; set; } = string.Empty;
-    public string AccessionNumber { get; set; } = string.Empty;
-    public string Modality { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty;
-    public string Dos { get; set; } = string.Empty;
-    public string ClientName { get; set; } = string.Empty;
-    public string TranscriberName { get; set; } = string.Empty;
-    public string RadName { get; set; } = string.Empty;
-    public string LastAuditAction { get; set; } = string.Empty;
-    public string LastAuditAt { get; set; } = string.Empty;
+    public int     Id                  { get; set; }
+    public string  PatientName         { get; set; } = string.Empty;
+    public string  FirstName           { get; set; } = string.Empty;
+    public string  LastName            { get; set; } = string.Empty;
+    public string  AccessionNumber     { get; set; } = string.Empty;
+    public string  Modality            { get; set; } = string.Empty;
+    public string  Exam                { get; set; } = string.Empty;
+    public string  Status              { get; set; } = string.Empty;
+    public string  Dos                 { get; set; } = string.Empty;
+    public string  Dob                 { get; set; } = string.Empty;
+    public int?    Age                 { get; set; }
+    public string  IdNumber            { get; set; } = string.Empty;
+    public string  ClientName          { get; set; } = string.Empty;
+    public string  TranscriberName     { get; set; } = string.Empty;
+    public string  RadName             { get; set; } = string.Empty;
+    public string  DotTime             { get; set; } = string.Empty;
+    public string  DodTime             { get; set; } = string.Empty;
+    public string  ReportTextSnippet   { get; set; } = string.Empty;
+    public string  PdfReport           { get; set; } = string.Empty;
+    public bool    IsDeleted           { get; set; }
 }
 
 // ── Standard Report ───────────────────────────────────────────────────────────

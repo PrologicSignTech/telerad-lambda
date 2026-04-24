@@ -64,6 +64,20 @@ public class MarkStatRequest
     public List<int> StudyIds { get; set; } = new();
 }
 
+public class AddKeyImageRequest
+{
+    public int StudyId { get; set; }
+    public string FileName { get; set; } = "";
+    public string Data { get; set; } = "";      // base64-encoded image bytes
+    public string ContentType { get; set; } = "image/jpeg";
+}
+
+public class DeleteKeyImageRequest
+{
+    public int StudyId { get; set; }
+    public string FilePath { get; set; } = ""; // the S3 key to remove from JSON array
+}
+
 public class CloneStudyRequest
 {
     public int StudyId { get; set; }
@@ -507,11 +521,21 @@ public class SavePerCharPriceRequest
 // ── Order Status ──────────────────────────────────────────────────────────────
 public class GetOrderStatusRequest
 {
-    public string? DateFrom { get; set; }
-    public string? DateTo { get; set; }
-    public string? Search { get; set; }
-    public int? Page { get; set; }
-    public int? PerPage { get; set; }
+    public string? DateFrom    { get; set; }
+    public string? DateTo      { get; set; }
+    public string? Search      { get; set; }   // global search (pname / acc / idnumber)
+    public string? OrderNo     { get; set; }
+    public string? FirstName   { get; set; }
+    public string? LastName    { get; set; }
+    public string? Client      { get; set; }
+    public string? IdNumber    { get; set; }
+    public string? AccNumber   { get; set; }
+    public string? Modality    { get; set; }
+    public string? Exam        { get; set; }
+    public string? ReportText  { get; set; }
+    public string? Status      { get; set; }
+    public int?    Page        { get; set; }
+    public int?    PerPage     { get; set; }
 }
 
 public class ReassignTranscriberRequest

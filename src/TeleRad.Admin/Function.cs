@@ -62,6 +62,8 @@ public class Function
                 TriggerHelper.GetOrderStatusV2              => await helper.GetOrderStatusV2Async(wrapper.Body),
                 TriggerHelper.GetAuditDetailOrderStatus     => await helper.GetAuditDetailOrderStatusAsync(wrapper.Body),
                 TriggerHelper.ReassignTranscriber           => await helper.ReassignTranscriberAsync(wrapper.Body),
+                TriggerHelper.MarkAsNewStudy                => await helper.MarkAsNewStudyAsync(wrapper.Body),
+                TriggerHelper.RestoreStudy                  => await helper.RestoreStudyAsync(wrapper.Body),
 
                 // ── Modalities ───────────────────────────────────────────────
                 TriggerHelper.GetModalities                 => await helper.GetModalitiesAsync(),

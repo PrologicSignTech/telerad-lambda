@@ -244,24 +244,48 @@ public class AdminHelper : HelperBase
         {
             await using var conn   = await OpenAsync();
             await using var cmd    = QueryHelper.GetOrderStatus(conn, req.Search, req.DateFrom, req.DateTo,
-                (page - 1) * perPage, perPage);
+                (page - 1) * perPage, perPage,
+                req.OrderNo, req.FirstName, req.LastName, req.Client, req.IdNumber,
+                req.AccNumber, req.Modality, req.Exam, req.ReportText, req.Status);
             await using var reader = await cmd.ExecuteReaderAsync();
             var results = new List<OrderStatusResponse>();
             while (await reader.ReadAsync())
+            {
+                // Strip HTML from report_text, truncate to 50 chars (matches Laravel)
+                var rawReport = Str(reader, "report_text");
+                var plainReport = System.Text.RegularExpressions.Regex.Replace(rawReport, "<.*?>", "");
+                if (plainReport.Length > 50) plainReport = plainReport.Substring(0, 50) + "…";
+
+                // dob is now DATE_FORMAT'd to 'YYYY-MM-DD' string
+                var dobStr = Str(reader, "dob");
+                int? age = null;
+                if (DateTime.TryParse(dobStr, out var dob))
+                    age = (int)((DateTime.Today - dob).TotalDays / 365.25);
+
                 results.Add(new OrderStatusResponse
                 {
                     Id              = reader.GetInt32("id"),
                     PatientName     = Str(reader, "patient_name"),
+                    FirstName       = Str(reader, "firstname"),
+                    LastName        = Str(reader, "lastname"),
                     AccessionNumber = Str(reader, "accession_number"),
                     Modality        = Str(reader, "modality"),
+                    Exam            = Str(reader, "exam"),
                     Status          = Str(reader, "status"),
-                    Dos             = DateStr(reader, "dos"),
+                    Dos             = Str(reader, "dos"),
+                    Dob             = dobStr,
+                    Age             = age,
+                    IdNumber        = Str(reader, "idnumber"),
                     ClientName      = Str(reader, "client_name"),
                     TranscriberName = Str(reader, "transcriber_name"),
                     RadName         = Str(reader, "rad_name"),
-                    LastAuditAction = Str(reader, "last_audit_action"),
-                    LastAuditAt     = DateStr(reader, "last_audit_at")
+                    DotTime         = Str(reader, "dot_time"),
+                    DodTime         = Str(reader, "dod_time"),
+                    ReportTextSnippet = plainReport,
+                    PdfReport       = Str(reader, "pdf_report"),
+                    IsDeleted       = !reader.IsDBNull(reader.GetOrdinal("is_deleted")) && reader.GetInt32("is_deleted") == 1,
                 });
+            }
             return FunctionBase.Ok(results);
         }
         catch (Exception ex) { return Err("GetOrderStatus", ex); }
@@ -312,6 +336,50 @@ public class AdminHelper : HelperBase
             return FunctionBase.Ok(null, "Transcriber reassigned.");
         }
         catch (Exception ex) { return Err("ReassignTranscriber", ex); }
+    }
+
+    // Mirrors Laravel markAsNewStudy: changes type to 'new study' (blocked for rad final report)
+    public async Task<APIGatewayProxyResponse> MarkAsNewStudyAsync(string? body)
+    {
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0) return FunctionBase.BadRequest("StudyId is required.");
+        try
+        {
+            await using var conn = await OpenAsync();
+            await using var chk  = new MySqlConnector.MySqlCommand("SELECT type FROM tran_typewordlist WHERE id=@id LIMIT 1", conn);
+            chk.Parameters.AddWithValue("@id", req.StudyId);
+            await using var chkR = await chk.ExecuteReaderAsync();
+            string currentStatus = "";
+            if (await chkR.ReadAsync()) currentStatus = chkR.IsDBNull(0) ? "" : chkR.GetString(0);
+            await chkR.CloseAsync();
+            if (currentStatus == "rad final report")
+                return FunctionBase.BadRequest("Cannot recover a finalized report.");
+            await using var cmd = new MySqlConnector.MySqlCommand("UPDATE tran_typewordlist SET type='new study' WHERE id=@id", conn);
+            cmd.Parameters.AddWithValue("@id", req.StudyId);
+            await cmd.ExecuteNonQueryAsync();
+            await using var auditCmd = QueryHelper.InsertAudit(conn, req.StudyId, _token.UserId, "Recovered to New Study", null);
+            await auditCmd.ExecuteNonQueryAsync();
+            return FunctionBase.Ok(null, "Study recovered.");
+        }
+        catch (Exception ex) { return Err("MarkAsNewStudy", ex); }
+    }
+
+    // Mirrors Laravel getDeleteStore: restores a soft-deleted study
+    public async Task<APIGatewayProxyResponse> RestoreStudyAsync(string? body)
+    {
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0) return FunctionBase.BadRequest("StudyId is required.");
+        try
+        {
+            await using var conn = await OpenAsync();
+            await using var cmd  = new MySqlConnector.MySqlCommand("UPDATE tran_typewordlist SET `delete`=0 WHERE id=@id", conn);
+            cmd.Parameters.AddWithValue("@id", req.StudyId);
+            await cmd.ExecuteNonQueryAsync();
+            await using var auditCmd = QueryHelper.InsertAudit(conn, req.StudyId, _token.UserId, "Study Restored", null);
+            await auditCmd.ExecuteNonQueryAsync();
+            return FunctionBase.Ok(null, "Study restored.");
+        }
+        catch (Exception ex) { return Err("RestoreStudy", ex); }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
