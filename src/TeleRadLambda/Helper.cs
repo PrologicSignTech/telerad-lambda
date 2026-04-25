@@ -1211,10 +1211,12 @@ public class Helper
                 {
                     Id             = reader.GetInt32("id"),
                     FileName       = Str(reader, "file_name"),
-                    FileUrl        = Str(reader, "file_name"),   // S3 key = file_name
+                    FileUrl        = Str(reader, "file_name"),
+                    FaxNumber      = Str(reader, "from"),
                     IsRead         = false,
                     ClientUsername = Str(reader, "client_username"),
-                    ReceivedAt     = DateStr(reader, "created_at")
+                    ReceivedAt     = DateStr(reader, "created_at"),
+                    ModifiedAt     = DateStr(reader, "modified_at")
                 });
             }
             return Function.Ok(faxes);
@@ -1240,7 +1242,8 @@ public class Helper
                 {
                     Id         = reader.GetInt32("id"),
                     FileName   = Str(reader, "file_name"),
-                    FileUrl    = Str(reader, "file_name"),   // S3 key = file_name
+                    FileUrl    = Str(reader, "file_name"),
+                    FaxNumber  = Str(reader, "from"),
                     IsRead     = false,
                     ReceivedAt = DateStr(reader, "created_at")
                 });

@@ -156,7 +156,9 @@ public class InboundFaxResponse
     public int Id { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string FileUrl { get; set; } = string.Empty;
+    public string FaxNumber { get; set; } = string.Empty;
     public string ReceivedAt { get; set; } = string.Empty;
+    public string ModifiedAt { get; set; } = string.Empty;
     public bool IsRead { get; set; }
     public string? ClientUsername { get; set; }
 }

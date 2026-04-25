@@ -119,10 +119,12 @@ public class AdminHelper : HelperBase
                 {
                     Id             = reader.GetInt32("id"),
                     FileName       = Str(reader, "file_name"),
-                    FileUrl        = Str(reader, "file_name"),   // same path used for presigned URL
+                    FileUrl        = Str(reader, "file_name"),
+                    FaxNumber      = Str(reader, "from"),
                     IsRead         = false,
                     ClientUsername = Str(reader, "client_username"),
-                    ReceivedAt     = DateStr(reader, "created_at")
+                    ReceivedAt     = DateStr(reader, "created_at"),
+                    ModifiedAt     = SafeDateStr(reader, "modified_at")
                 });
             return FunctionBase.Ok(faxes);
         }
@@ -146,8 +148,9 @@ public class AdminHelper : HelperBase
                 {
                     Id         = reader.GetInt32("id"),
                     FileName   = Str(reader, "file_name"),
-                    FileUrl    = Str(reader, "file_name"),   // S3 key = file_name
-                    IsRead     = !reader.IsDBNull(reader.GetOrdinal("is_read")) && reader.GetInt32("is_read") == 1,
+                    FileUrl    = Str(reader, "file_name"),
+                    FaxNumber  = Str(reader, "from"),
+                    IsRead     = false,
                     ReceivedAt = DateStr(reader, "created_at")
                 });
             return FunctionBase.Ok(faxes);
