@@ -808,6 +808,7 @@ public static class QueryHelper
                    u.username AS client_username
             FROM fax_receiveds fr
             LEFT JOIN tran_user u ON u.id = fr.ref_id
+            WHERE fr.ref_id IS NULL
             ORDER BY fr.id DESC LIMIT @limit OFFSET @offset");
         cmd.Parameters.AddWithValue("@limit", perPage);
         cmd.Parameters.AddWithValue("@offset", offset);
