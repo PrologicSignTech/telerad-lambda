@@ -117,11 +117,12 @@ public class AdminHelper : HelperBase
             while (await reader.ReadAsync())
                 faxes.Add(new InboundFaxResponse
                 {
-                    Id = reader.GetInt32("id"), FileName = Str(reader, "file_name"),
-                    FileUrl = Str(reader, "file_path"),
-                    IsRead = !reader.IsDBNull(reader.GetOrdinal("is_read")) && reader.GetInt32("is_read") == 1,
+                    Id             = reader.GetInt32("id"),
+                    FileName       = Str(reader, "file_name"),
+                    FileUrl        = Str(reader, "file_name"),   // same path used for presigned URL
+                    IsRead         = !reader.IsDBNull(reader.GetOrdinal("is_read")) && reader.GetInt32("is_read") == 1,
                     ClientUsername = Str(reader, "client_username"),
-                    ReceivedAt = DateStr(reader, "created_at")
+                    ReceivedAt     = DateStr(reader, "created_at")
                 });
             return FunctionBase.Ok(faxes);
         }
@@ -143,9 +144,10 @@ public class AdminHelper : HelperBase
             while (await reader.ReadAsync())
                 faxes.Add(new InboundFaxResponse
                 {
-                    Id = reader.GetInt32("id"), FileName = Str(reader, "file_name"),
-                    FileUrl = Str(reader, "file_path"),
-                    IsRead = !reader.IsDBNull(reader.GetOrdinal("is_read")) && reader.GetInt32("is_read") == 1,
+                    Id         = reader.GetInt32("id"),
+                    FileName   = Str(reader, "file_name"),
+                    FileUrl    = Str(reader, "file_name"),   // S3 key = file_name
+                    IsRead     = !reader.IsDBNull(reader.GetOrdinal("is_read")) && reader.GetInt32("is_read") == 1,
                     ReceivedAt = DateStr(reader, "created_at")
                 });
             return FunctionBase.Ok(faxes);
