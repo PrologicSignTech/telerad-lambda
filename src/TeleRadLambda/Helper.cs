@@ -1143,6 +1143,14 @@ public class Helper
         if (req == null || string.IsNullOrWhiteSpace(req.FaxNumber))
             return Function.BadRequest("FaxNumber is required.");
 
+        // ── Dev/demo guard ────────────────────────────────────────────────────
+        // When FAX_SEND_ENABLED=false in template.yaml the fax is NOT dispatched.
+        // Return a suppressed response so the UI behaves normally without sending.
+        if (!AppConfig.FaxSendEnabled)
+            return Function.Ok(
+                new { faxId = 0, status = "dev-suppressed" },
+                $"Fax sending is disabled on this environment (Stage={AppConfig.Stage}). Set FAX_SEND_ENABLED=true in template.yaml to enable.");
+
         try
         {
             // Actual Twilio/Globalsender call would go here; we record the intent

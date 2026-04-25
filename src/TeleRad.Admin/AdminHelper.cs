@@ -58,6 +58,14 @@ public class AdminHelper : HelperBase
         if (req == null || string.IsNullOrWhiteSpace(req.FaxNumber))
             return FunctionBase.BadRequest("FaxNumber is required.");
 
+        // ── Dev/demo guard ────────────────────────────────────────────────────
+        // When FAX_SEND_ENABLED=false in template.yaml the fax is NOT dispatched.
+        // Return a suppressed response so the UI behaves normally without sending.
+        if (!AppConfig.FaxSendEnabled)
+            return FunctionBase.Ok(
+                new { faxId = 0, status = "dev-suppressed" },
+                $"Fax sending is disabled on this environment (Stage={AppConfig.Stage}). Set FAX_SEND_ENABLED=true in template.yaml to enable.");
+
         try
         {
             var filePath = $"faxes/outbound/{req.FileName}";
