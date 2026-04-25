@@ -804,7 +804,7 @@ public static class QueryHelper
     {
         var cmd = Cmd(c, @"
             SELECT fr.id, fr.`from`, fr.media_file AS file_name,
-                   fr.is_read, fr.created_at,
+                   fr.created_at,
                    u.username AS client_username
             FROM fax_receiveds fr
             LEFT JOIN tran_user u ON u.id = fr.ref_id
@@ -817,7 +817,7 @@ public static class QueryHelper
     public static MySqlCommand GetIncomingFaxesByClient(MySqlConnection c, string clientUsername)
     {
         var cmd = Cmd(c, @"
-            SELECT fr.id, fr.`from`, fr.media_file AS file_name, fr.is_read, fr.created_at
+            SELECT fr.id, fr.`from`, fr.media_file AS file_name, fr.created_at
             FROM fax_receiveds fr
             JOIN tran_user u ON u.id = fr.ref_id
             WHERE u.username = @cu

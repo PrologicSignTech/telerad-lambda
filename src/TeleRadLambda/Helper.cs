@@ -1212,7 +1212,7 @@ public class Helper
                     Id             = reader.GetInt32("id"),
                     FileName       = Str(reader, "file_name"),
                     FileUrl        = Str(reader, "file_name"),   // S3 key = file_name
-                    IsRead         = !reader.IsDBNull(reader.GetOrdinal("is_read")) && reader.GetInt32("is_read") == 1,
+                    IsRead         = false,
                     ClientUsername = Str(reader, "client_username"),
                     ReceivedAt     = DateStr(reader, "created_at")
                 });
@@ -1241,7 +1241,7 @@ public class Helper
                     Id         = reader.GetInt32("id"),
                     FileName   = Str(reader, "file_name"),
                     FileUrl    = Str(reader, "file_name"),   // S3 key = file_name
-                    IsRead     = !reader.IsDBNull(reader.GetOrdinal("is_read")) && reader.GetInt32("is_read") == 1,
+                    IsRead     = false,
                     ReceivedAt = DateStr(reader, "created_at")
                 });
             }

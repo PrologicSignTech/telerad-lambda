@@ -120,7 +120,7 @@ public class AdminHelper : HelperBase
                     Id             = reader.GetInt32("id"),
                     FileName       = Str(reader, "file_name"),
                     FileUrl        = Str(reader, "file_name"),   // same path used for presigned URL
-                    IsRead         = !reader.IsDBNull(reader.GetOrdinal("is_read")) && reader.GetInt32("is_read") == 1,
+                    IsRead         = false,
                     ClientUsername = Str(reader, "client_username"),
                     ReceivedAt     = DateStr(reader, "created_at")
                 });

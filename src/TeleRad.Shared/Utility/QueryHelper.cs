@@ -933,7 +933,7 @@ public static class QueryHelper
         // fax_receiveds: id, from, media_file, is_read, ref_id, created_at
         var cmd = Cmd(c, @"
             SELECT fr.id, fr.`from`, fr.media_file AS file_name,
-                   fr.is_read, fr.created_at,
+                   fr.created_at,
                    u.username AS client_username
             FROM fax_receiveds fr
             LEFT JOIN tran_user u ON u.id = fr.ref_id
@@ -950,7 +950,7 @@ public static class QueryHelper
         //   ORDER BY created_at DESC LIMIT 50
         //   media_file = full S3 path: php/faxesin/USERNAME/filename.pdf
         var cmd = Cmd(c, @"
-            SELECT fr.id, fr.`from`, fr.media_file AS file_name, fr.is_read, fr.created_at
+            SELECT fr.id, fr.`from`, fr.media_file AS file_name, fr.created_at
             FROM fax_receiveds fr
             JOIN tran_user u ON u.id = fr.ref_id
             WHERE u.username = @cu
