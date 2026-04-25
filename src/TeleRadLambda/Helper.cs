@@ -1180,11 +1180,12 @@ public class Helper
             {
                 faxes.Add(new FaxResponse
                 {
-                    Id        = reader.GetInt32("id"),
-                    FaxNumber = Str(reader, "fax_number"),
-                    FileName  = Str(reader, "file_name"),
-                    Status    = Str(reader, "status"),
-                    SentAt    = DateStr(reader, "created_at")
+                    Id          = reader.GetInt32("id"),
+                    FaxNumber   = Str(reader, "fax_number"),
+                    FileName    = Str(reader, "file_name"),
+                    Status      = Str(reader, "status"),
+                    SentAt      = DateStr(reader, "created_at"),
+                    DeliveredAt = DateStr(reader, "delevered_at")
                 });
             }
             return Function.Ok(faxes);

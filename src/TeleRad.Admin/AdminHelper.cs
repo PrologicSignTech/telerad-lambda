@@ -94,7 +94,8 @@ public class AdminHelper : HelperBase
                 {
                     Id = reader.GetInt32("id"), FaxNumber = Str(reader, "fax_number"),
                     FileName = Str(reader, "file_name"), Status = Str(reader, "status"),
-                    SentAt = DateStr(reader, "created_at")
+                    SentAt = DateStr(reader, "created_at"),
+                    DeliveredAt = SafeDateStr(reader, "delevered_at")
                 });
             return FunctionBase.Ok(faxes);
         }
@@ -204,7 +205,8 @@ public class AdminHelper : HelperBase
                 {
                     Id = reader.GetInt32("id"), FaxNumber = Str(reader, "fax_number"),
                     FileName = Str(reader, "file_name"), Status = Str(reader, "status"),
-                    SentAt = DateStr(reader, "created_at")
+                    SentAt = DateStr(reader, "created_at"),
+                    DeliveredAt = SafeDateStr(reader, "delevered_at")
                 });
             return FunctionBase.NotFound("Fax not found.");
         }
