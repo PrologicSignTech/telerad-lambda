@@ -815,6 +815,18 @@ public static class QueryHelper
         return cmd;
     }
 
+    public static MySqlCommand GetInboundFaxesByPaths(MySqlConnection c, List<string> paths)
+    {
+        var placeholders = string.Join(",", paths.Select((_, i) => $"@p{i}"));
+        var cmd = Cmd(c, $@"
+            SELECT id, `from`, media_file, created_at, modified_at
+            FROM fax_receiveds
+            WHERE media_file IN ({placeholders})");
+        for (int i = 0; i < paths.Count; i++)
+            cmd.Parameters.AddWithValue($"@p{i}", paths[i]);
+        return cmd;
+    }
+
     public static MySqlCommand GetIncomingFaxesByClient(MySqlConnection c, string clientUsername)
     {
         var cmd = Cmd(c, @"

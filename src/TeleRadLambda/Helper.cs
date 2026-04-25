@@ -1,4 +1,6 @@
 using Amazon.Lambda.APIGatewayEvents;
+using Amazon.S3;
+using Amazon.S3.Model;
 using MySqlConnector;
 using Newtonsoft.Json;
 using TeleRadLambda.Model;
@@ -10,6 +12,8 @@ public class Helper
 {
     private readonly string _cs;
     private readonly TokenValidationResult _token;
+    private static readonly string S3Bucket =
+        Environment.GetEnvironmentVariable("S3_BUCKET") ?? "pacsmst";
 
     public Helper(string connectionString, TokenValidationResult? token = null)
     {
@@ -1195,29 +1199,84 @@ public class Helper
 
     public async Task<APIGatewayProxyResponse> GetInboundFaxesAsync(string? body)
     {
-        var req     = Parse<PaginatedRequest>(body) ?? new PaginatedRequest();
-        var page    = Math.Max(1, req.Page ?? 1);
-        var perPage = req.PerPage ?? 20;
-
+        // Mirror Laravel inboundFax():
+        // 1. List PDF files directly in php/faxesin/ (non-recursive, root only)
+        // 2. For each file, look up fax_receiveds by media_file
+        // 3. If no DB record, still show file using S3 LastModified as date
         try
         {
-            await using var conn   = await OpenAsync();
-            await using var cmd    = QueryHelper.GetInboundFaxes(conn, (page - 1) * perPage, perPage);
+            // --- Step 1: list S3 root-level PDFs in php/faxesin/ ---
+            using var s3 = new AmazonS3Client();
+            var s3Files = new List<S3Object>();
+            string? continuationToken = null;
+            do
+            {
+                var listReq = new ListObjectsV2Request
+                {
+                    BucketName        = S3Bucket,
+                    Prefix            = "php/faxesin/",
+                    Delimiter         = "/",
+                    ContinuationToken = continuationToken,
+                    MaxKeys           = 1000
+                };
+                var listResp = await s3.ListObjectsV2Async(listReq);
+                s3Files.AddRange(listResp.S3Objects.Where(o =>
+                    o.Key.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)));
+                continuationToken = listResp.IsTruncated ? listResp.NextContinuationToken : null;
+            } while (continuationToken != null);
+
+            if (s3Files.Count == 0)
+                return Function.Ok(new List<InboundFaxResponse>());
+
+            // --- Step 2: bulk DB lookup by media_file paths ---
+            await using var conn = await OpenAsync();
+            var keys = s3Files.Select(f => f.Key).ToList();
+            await using var cmd = QueryHelper.GetInboundFaxesByPaths(conn, keys);
             await using var reader = await cmd.ExecuteReaderAsync();
-            var faxes = new List<InboundFaxResponse>();
+            var dbMap = new Dictionary<string, (int id, string from, string createdAt, string modifiedAt)>();
             while (await reader.ReadAsync())
             {
-                faxes.Add(new InboundFaxResponse
+                var path = Str(reader, "media_file");
+                dbMap[path] = (
+                    reader.GetInt32("id"),
+                    Str(reader, "from"),
+                    DateStr(reader, "created_at"),
+                    DateStr(reader, "modified_at")
+                );
+            }
+
+            // --- Step 3: build response (S3 is source of truth) ---
+            var faxes = new List<InboundFaxResponse>();
+            foreach (var s3f in s3Files.OrderByDescending(f => f.LastModified))
+            {
+                if (dbMap.TryGetValue(s3f.Key, out var db))
                 {
-                    Id             = reader.GetInt32("id"),
-                    FileName       = Str(reader, "file_name"),
-                    FileUrl        = Str(reader, "file_name"),
-                    FaxNumber      = Str(reader, "from"),
-                    IsRead         = false,
-                    ClientUsername = Str(reader, "client_username"),
-                    ReceivedAt     = DateStr(reader, "created_at"),
-                    ModifiedAt     = DateStr(reader, "modified_at")
-                });
+                    var mod = string.IsNullOrEmpty(db.modifiedAt)
+                        ? s3f.LastModified.ToString("yyyy-MM-dd HH:mm:ss")
+                        : db.modifiedAt;
+                    faxes.Add(new InboundFaxResponse
+                    {
+                        Id         = db.id,
+                        FileName   = s3f.Key,
+                        FileUrl    = s3f.Key,
+                        FaxNumber  = db.from,
+                        ReceivedAt = db.createdAt,
+                        ModifiedAt = mod
+                    });
+                }
+                else
+                {
+                    var dt = s3f.LastModified.ToString("yyyy-MM-dd HH:mm:ss");
+                    faxes.Add(new InboundFaxResponse
+                    {
+                        Id         = 0,
+                        FileName   = s3f.Key,
+                        FileUrl    = s3f.Key,
+                        FaxNumber  = string.Empty,
+                        ReceivedAt = dt,
+                        ModifiedAt = dt
+                    });
+                }
             }
             return Function.Ok(faxes);
         }
