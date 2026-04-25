@@ -419,7 +419,7 @@ public static class QueryHelper
             SELECT u.id, u.username, u.email, u.firstname, u.lastname, u.displayname AS name,
                    u.usertype, u.block AS status, u.phone, u.fax, u.office AS address
             FROM tran_user u
-            WHERE u.usertype = 4";
+            WHERE u.usertype = 4 AND u.block = 0";
         var cmd = new MySqlCommand { Connection = c };
         if (!string.IsNullOrEmpty(search))
         {
@@ -427,7 +427,7 @@ public static class QueryHelper
                           OR u.displayname LIKE @s OR u.email LIKE @s)";
             cmd.Parameters.AddWithValue("@s", $"%{search}%");
         }
-        sql += " LIMIT @lim OFFSET @off";
+        sql += " ORDER BY u.displayname ASC LIMIT @lim OFFSET @off";
         cmd.Parameters.AddWithValue("@lim", perPage);
         cmd.Parameters.AddWithValue("@off", offset);
         cmd.CommandText = sql;
