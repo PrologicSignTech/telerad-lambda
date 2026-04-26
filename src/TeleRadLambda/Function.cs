@@ -2,6 +2,7 @@ using Amazon.Lambda.APIGatewayEvents;
 using Amazon.Lambda.Core;
 using MySqlConnector;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using TeleRadLambda.Model;
 using TeleRadLambda.Utility;
 
@@ -316,11 +317,16 @@ public class Function
     internal static APIGatewayProxyResponse ServerError(string message)
         => Build(500, new ApiResponse { StatusCode = 500, StatusMessage = message });
 
+    private static readonly JsonSerializerSettings _camelCase = new()
+    {
+        ContractResolver = new CamelCasePropertyNamesContractResolver()
+    };
+
     private static APIGatewayProxyResponse Build(int statusCode, object body)
         => new()
         {
             StatusCode = statusCode,
-            Body       = JsonConvert.SerializeObject(body),
+            Body       = JsonConvert.SerializeObject(body, _camelCase),
             Headers    = new Dictionary<string, string>
             {
                 { "Content-Type",                 "application/json" },
