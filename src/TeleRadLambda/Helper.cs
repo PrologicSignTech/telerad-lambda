@@ -2491,15 +2491,23 @@ public class Helper
 
     private static string Str(MySqlDataReader r, string col)
     {
-        var o = r.GetOrdinal(col);
-        return r.IsDBNull(o) ? string.Empty : r.GetString(o);
+        try
+        {
+            var o = r.GetOrdinal(col);
+            return r.IsDBNull(o) ? string.Empty : r.GetString(o);
+        }
+        catch { return string.Empty; }
     }
 
     private static string DateStr(MySqlDataReader r, string col)
     {
-        var o = r.GetOrdinal(col);
-        if (r.IsDBNull(o)) return string.Empty;
-        return r.GetDateTime(o).ToString("yyyy-MM-dd HH:mm:ss");
+        try
+        {
+            var o = r.GetOrdinal(col);
+            if (r.IsDBNull(o)) return string.Empty;
+            return r.GetDateTime(o).ToString("yyyy-MM-dd HH:mm:ss");
+        }
+        catch { return string.Empty; }
     }
 
     private static APIGatewayProxyResponse Err(string method, Exception ex)
