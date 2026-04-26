@@ -30,6 +30,8 @@ public class GetStudiesRequest
     /// <summary>Comma-separated modalities</summary>
     public string? ModalityList { get; set; }
     public string? Type { get; set; }
+    public int Page { get; set; } = 0;
+    public int PerPage { get; set; } = 50;
 }
 
 public class UpdateStudyStatusRequest
@@ -614,4 +616,10 @@ public class SaveQbTranscriberMappingRequest
 public class PushQbTranscribersRequest
 {
     public List<int> TranscriberIds { get; set; } = new();
+}
+
+public class GetPresignedUrlRequest
+{
+    public string? FilePath { get; set; }
+    public string? Key { get; set; }
 }

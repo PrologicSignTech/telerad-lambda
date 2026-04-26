@@ -1839,6 +1839,158 @@ public static class QueryHelper
         return cmd;
     }
 
+    // ── Studies — additional ──────────────────────────────────────────────────
+
+    public static MySqlCommand GetStudyPreview(MySqlConnection c, int studyId)
+    {
+        var cmd = Cmd(c, @"
+            SELECT
+                s.id, s.pname AS patient_name, s.firstname, s.lastname,
+                s.dob, s.dos, s.idnumber, s.access_number, s.ordering_physician,
+                s.modality, s.description AS exam, s.type AS status,
+                s.report_text, s.impression_text, s.report_key_image, s.is_addendum,
+                s.pdf_report, s.sid,
+                r.displayname  AS rad_name,
+                r.signature    AS rad_signature,
+                t.displayname  AS transcriber_name,
+                ref_u.displayname AS client_name,
+                ref_u.office      AS client_address,
+                ref_u.phone       AS client_phone,
+                ref_u.fax         AS client_fax,
+                COALESCE(
+                    NULLIF((SELECT tmpl.header_image FROM tran_template tmpl WHERE tmpl.id = s.templateid LIMIT 1), ''),
+                    NULLIF((SELECT tmpl.header_image FROM tran_template tmpl WHERE tmpl.userid = s.ref_id AND tmpl.header_image != '' ORDER BY tmpl.id DESC LIMIT 1), ''),
+                    NULLIF((SELECT tmpl.header_image FROM tran_template tmpl WHERE tmpl.userid = s.ref_id ORDER BY tmpl.id DESC LIMIT 1), '')
+                ) AS header_image,
+                COALESCE(
+                    NULLIF((SELECT tmpl.footer_image FROM tran_template tmpl WHERE tmpl.id = s.templateid LIMIT 1), ''),
+                    NULLIF((SELECT tmpl.footer_image FROM tran_template tmpl WHERE tmpl.userid = s.ref_id AND tmpl.footer_image != '' ORDER BY tmpl.id DESC LIMIT 1), ''),
+                    NULLIF((SELECT tmpl.footer_image FROM tran_template tmpl WHERE tmpl.userid = s.ref_id ORDER BY tmpl.id DESC LIMIT 1), '')
+                ) AS footer_image,
+                COALESCE(
+                    NULLIF((SELECT tmpl.heading_text FROM tran_template tmpl WHERE tmpl.id = s.templateid LIMIT 1), ''),
+                    NULLIF((SELECT tmpl.heading_text FROM tran_template tmpl WHERE tmpl.userid = s.ref_id AND tmpl.heading_text != '' ORDER BY tmpl.id DESC LIMIT 1), ''),
+                    NULLIF((SELECT tmpl.heading_text FROM tran_template tmpl WHERE tmpl.userid = s.ref_id ORDER BY tmpl.id DESC LIMIT 1), '')
+                ) AS heading_text,
+                COALESCE(
+                    NULLIF(s.report_text_signature, ''),
+                    NULLIF((SELECT tmpl.signature_text FROM tran_template tmpl WHERE tmpl.id = s.templateid LIMIT 1), ''),
+                    NULLIF((SELECT tmpl.signature_text FROM tran_template tmpl WHERE tmpl.userid = s.ref_id AND tmpl.signature_text != '' ORDER BY tmpl.id DESC LIMIT 1), ''),
+                    NULLIF((SELECT tmpl.signature_text FROM tran_template tmpl WHERE tmpl.userid = s.ref_id ORDER BY tmpl.id DESC LIMIT 1), '')
+                ) AS signature_text,
+                (SELECT a.curr_date_time FROM tran_audit a WHERE a.eid = s.id AND a.status_insert = 'DOD Time' ORDER BY a.id DESC LIMIT 1) AS dod,
+                (SELECT a.curr_date_time FROM tran_audit a WHERE a.eid = s.id AND a.status_insert = 'DOT Time' ORDER BY a.id DESC LIMIT 1) AS dot
+            FROM tran_typewordlist s
+            LEFT JOIN tran_user r     ON r.id = s.rad_id
+            LEFT JOIN tran_user t     ON t.id = s.trans_id
+            LEFT JOIN tran_user ref_u ON ref_u.id = s.ref_id
+            WHERE s.id = @id LIMIT 1");
+        cmd.Parameters.AddWithValue("@id", studyId);
+        return cmd;
+    }
+
+    public static MySqlCommand DeleteStudy(MySqlConnection c, int studyId)
+    {
+        var cmd = Cmd(c, "UPDATE tran_typewordlist SET `delete` = 1, type = 'cancel exam' WHERE id = @id");
+        cmd.Parameters.AddWithValue("@id", studyId);
+        return cmd;
+    }
+
+    /// <summary>
+    /// Resets delete=0 and optionally changes type. Matches Laravel StudyController::updateStatus() save().
+    /// Pass null for newType to leave the type unchanged.
+    /// </summary>
+    public static MySqlCommand RestoreStudyDeleteFlag(MySqlConnection c, int studyId, string? newType)
+    {
+        if (!string.IsNullOrWhiteSpace(newType))
+        {
+            var cmd2 = Cmd(c, "UPDATE tran_typewordlist SET `delete` = 0, type = @type WHERE id = @id");
+            cmd2.Parameters.AddWithValue("@type", newType.Replace("_", " "));
+            cmd2.Parameters.AddWithValue("@id", studyId);
+            return cmd2;
+        }
+        var cmd = Cmd(c, "UPDATE tran_typewordlist SET `delete` = 0 WHERE id = @id");
+        cmd.Parameters.AddWithValue("@id", studyId);
+        return cmd;
+    }
+
+    /// <summary>
+    /// Stores a viewer token in tran_cd_import. Matches Laravel CdImport::create().
+    /// </summary>
+    public static MySqlCommand InsertCdImportToken(MySqlConnection c, int userId, string username, string token)
+    {
+        var cmd = Cmd(c, @"
+            INSERT INTO tran_cd_import (userid, username, token, created_at, updated_at)
+            VALUES (@uid, @uname, @token, NOW(), NOW())");
+        cmd.Parameters.AddWithValue("@uid",   userId);
+        cmd.Parameters.AddWithValue("@uname", username);
+        cmd.Parameters.AddWithValue("@token", token);
+        return cmd;
+    }
+
+    public static MySqlCommand GetStudiesBatch(MySqlConnection c, IList<string> statuses, int? scopeUserId, int? userType, int offset, int perPage)
+    {
+        var cmd = new MySqlCommand { Connection = c };
+        var conditions = new System.Text.StringBuilder();
+        for (int i = 0; i < statuses.Count; i++)
+        {
+            if (i > 0) conditions.Append(" OR ");
+            conditions.Append($"(s.type = @st{i} OR s.type = REPLACE(@st{i},'_',' '))");
+            cmd.Parameters.AddWithValue($"@st{i}", statuses[i]);
+        }
+        var sql = $@"
+            SELECT s.id,
+                   CAST(s.id AS CHAR)                      AS order_number,
+                   s.pname                                 AS patient_name,
+                   s.firstname                             AS patient_first_name,
+                   s.lastname                              AS patient_last_name,
+                   s.idnumber                              AS patient_id,
+                   s.dob                                   AS patient_dob,
+                   s.access_number                         AS accession_number,
+                   s.modality,
+                   NULLIF(TRIM(s.description), '')         AS exam,
+                   NULLIF(TRIM(s.ordering_physician), '')  AS ordering_physician,
+                   s.type                                  AS status,
+                   s.dos, s.sid,
+                   ref_u.displayname                       AS client,
+                   ref_u.displayname                       AS client_name,
+                   ref_u.username                          AS client_username,
+                   ref_u.office                            AS client_address,
+                   ref_u.phone                             AS client_phone,
+                   ref_u.fax                               AS client_fax,
+                   trans_u.displayname                     AS transcriber_name,
+                   rad_u.displayname                       AS rad_name,
+                   rad_u.signature                         AS rad_signature,
+                   s.report_text, s.impression_text, s.pdf_page,
+                   s.rad_id, s.trans_id AS transcriber_id,
+                   s.stat AS is_stat,
+                   s.report_date AS updated_at
+            FROM tran_typewordlist s
+            LEFT JOIN tran_user ref_u   ON ref_u.id   = s.ref_id
+            LEFT JOIN tran_user trans_u ON trans_u.id = s.trans_id
+            LEFT JOIN tran_user rad_u   ON rad_u.id   = s.rad_id
+            WHERE ({conditions}) AND s.`delete` = 0";
+
+        if (userType == 2 && scopeUserId.HasValue) { sql += " AND s.rad_id = @sid";   cmd.Parameters.AddWithValue("@sid", scopeUserId.Value); }
+        else if (userType == 3 && scopeUserId.HasValue) { sql += " AND s.trans_id = @sid"; cmd.Parameters.AddWithValue("@sid", scopeUserId.Value); }
+        else if (userType == 4 && scopeUserId.HasValue) { sql += " AND s.ref_id = @sid";   cmd.Parameters.AddWithValue("@sid", scopeUserId.Value); }
+
+        sql += " ORDER BY s.id DESC LIMIT @limit OFFSET @offset";
+        cmd.Parameters.AddWithValue("@limit",  perPage);
+        cmd.Parameters.AddWithValue("@offset", offset);
+        cmd.CommandText = sql;
+        return cmd;
+    }
+
+    public static MySqlCommand GetPendingModalities(MySqlConnection c)
+    {
+        return Cmd(c, @"
+            SELECT DISTINCT modality
+            FROM tran_typewordlist
+            WHERE modality IS NOT NULL AND modality != '' AND `delete` = 0
+            ORDER BY modality ASC");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private static MySqlCommand Cmd(MySqlConnection c, string sql)

@@ -1475,9 +1475,27 @@ public class Helper
         try
         {
             await using var conn = await OpenAsync();
-            var parts = req.DateRange?.Split('|');
-            var df    = parts?.Length >= 1 ? parts[0].Trim() : null;
-            var dt    = parts?.Length == 2 ? parts[1].Trim() : null;
+
+            // Resolve named ranges to actual yyyy-MM-dd date strings
+            static (string? df, string? dt) ResolveDateRange(string? range)
+            {
+                if (string.IsNullOrWhiteSpace(range)) return (null, null);
+                var today = DateTime.Today;
+                return range.Trim() switch
+                {
+                    "Today"     => (today.ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+                    "ThisWeek"  => (today.AddDays(-(int)today.DayOfWeek).ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+                    "ThisMonth" => (new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+                    "Last3Months" => (today.AddMonths(-3).ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+                    "Last6Months" => (today.AddMonths(-6).ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+                    "ThisYear"  => (new DateTime(today.Year, 1, 1).ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd")),
+                    _ => range.Contains('|')
+                         ? (range.Split('|')[0].Trim(), range.Split('|')[1].Trim())
+                         : (range.Trim(), range.Trim())
+                };
+            }
+
+            var (df, dt) = ResolveDateRange(req.DateRange);
 
             MySqlCommand cmd = req.ReportType.ToLower() switch
             {
@@ -2501,7 +2519,7 @@ public class Helper
             Status          = Str(r, "status"),
             Dos             = DateStr(r, "dos"),
             ClientName      = Str(r, "client_name"),
-            ReferrerName    = Str(r, "referrer_name"),
+            ReferrerName    = Str(r, "client_name"),
             RadId           = r.IsDBNull(r.GetOrdinal("rad_id")) ? null : r.GetInt32("rad_id"),
             TranscriberId   = r.IsDBNull(r.GetOrdinal("transcriber_id")) ? null : r.GetInt32("transcriber_id"),
             IsStat          = !r.IsDBNull(r.GetOrdinal("is_stat")) && r.GetInt32("is_stat") == 1,
@@ -3084,6 +3102,333 @@ public class Helper
             }
             return Function.Ok(new{pushed,errors});
         } catch(Exception ex){return Err("PushQbTranscribers",ex);}
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // STUDIES — MISSING TRIGGERS
+    // ══════════════════════════════════════════════════════════════════════════
+
+    public async Task<APIGatewayProxyResponse> GetPendingBatchAsync(string? body)
+    {
+        var req = Parse<GetStudiesRequest>(body) ?? new GetStudiesRequest();
+        try
+        {
+            await using var conn = await OpenAsync();
+            var statuses = new List<string>
+            {
+                "new_study","trans_new_messages","trans_reports_on_hold","rad_reports_on_hold",
+                "rad_reports_pending_signature","hold_for_comparison","missing_paperwork",
+                "speak_to_tech","missing_images","review","no_audio","in_progress"
+            };
+            await using var cmd = QueryHelper.GetStudiesBatch(conn, statuses, _token.UserId, _token.UserType, req.Page * req.PerPage, req.PerPage > 0 ? req.PerPage : 50);
+            return Function.Ok(await ReadStudies(cmd));
+        }
+        catch (Exception ex) { return Err("GetPendingBatch", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> GetStudyPreviewAsync(string? body)
+    {
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0)
+            return Function.BadRequest("StudyId is required.");
+        try
+        {
+            await using var conn   = await OpenAsync();
+            await using var cmd    = QueryHelper.GetStudyPreview(conn, req.StudyId);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+                return Function.NotFound("Study not found.");
+            var preview = new
+            {
+                Id               = reader.GetInt32("id"),
+                PatientName      = Str(reader, "patient_name"),
+                FirstName        = Str(reader, "firstname"),
+                LastName         = Str(reader, "lastname"),
+                Dob              = Str(reader, "dob"),
+                Dos              = Str(reader, "dos"),
+                IdNumber         = Str(reader, "idnumber"),
+                AccessNumber     = Str(reader, "access_number"),
+                OrderingPhysician= Str(reader, "ordering_physician"),
+                Modality         = Str(reader, "modality"),
+                Exam             = Str(reader, "exam"),
+                Status           = Str(reader, "status"),
+                ReportText       = Str(reader, "report_text"),
+                ImpressionText   = Str(reader, "impression_text"),
+                ReportKeyImage   = Str(reader, "report_key_image"),
+                IsAddendum       = reader.IsDBNull(reader.GetOrdinal("is_addendum")) ? false : reader.GetBoolean("is_addendum"),
+                PdfReport        = Str(reader, "pdf_report"),
+                RadName          = Str(reader, "rad_name"),
+                RadSignature     = Str(reader, "rad_signature"),
+                TranscriberName  = Str(reader, "transcriber_name"),
+                ClientName       = Str(reader, "client_name"),
+                ClientAddress    = Str(reader, "client_address"),
+                ClientPhone      = Str(reader, "client_phone"),
+                ClientFax        = Str(reader, "client_fax"),
+                HeaderImage      = Str(reader, "header_image"),
+                FooterImage      = Str(reader, "footer_image"),
+                HeadingText      = Str(reader, "heading_text"),
+                SignatureText    = Str(reader, "signature_text"),
+                Dod              = Str(reader, "dod"),
+                Dot              = Str(reader, "dot"),
+            };
+            return Function.Ok(preview);
+        }
+        catch (Exception ex) { return Err("GetStudyPreview", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> GetViewerTokenAsync(string? body)
+    {
+        // Matches Laravel HomeController::dicomcdtokens()
+        // Generates a token, stores it in tran_cd_import, returns viewer URL
+        try
+        {
+            var refId   = _token.UserId;
+            var refName = _token.Username;
+            var userType = _token.UserType;
+
+            // Generate random token (matches Laravel: Hash::make(str_random(8)))
+            var rawToken = Guid.NewGuid().ToString("N")[..8];
+            var token    = BCrypt.Net.BCrypt.HashPassword(rawToken);
+
+            // Build viewer URL matching Laravel logic
+            string viewerUrl = userType == 2
+                ? $"http://import.readingrad.com:9091/?un={refName}&userid={refId}&token={token}"
+                : $"http://import.readingrad.com:9091/CDImport?un={refName}&userid={refId}&token={token}";
+
+            // Store token in tran_cd_import table
+            await using var conn = await OpenAsync();
+            await using var cmd  = QueryHelper.InsertCdImportToken(conn, refId, refName, token);
+            await cmd.ExecuteNonQueryAsync();
+
+            return Function.Ok(viewerUrl);
+        }
+        catch (Exception ex) { return Err("GetViewerToken", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> UpdateStudyStatusAutoAsync(string? body)
+    {
+        // Matches Laravel StudyController::updateStatus()
+        // Complex conditional: checks current type, delete flag, PDF existence, and audio attachments
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0)
+            return Function.BadRequest("StudyId is required.");
+        try
+        {
+            await using var conn = await OpenAsync();
+
+            // Load current study state
+            await using var studyCmd    = QueryHelper.GetStudyById(conn, req.StudyId);
+            await using var studyReader = await studyCmd.ExecuteReaderAsync();
+            if (!await studyReader.ReadAsync())
+                return Function.NotFound("Study not found.");
+
+            var currentType   = Str(studyReader, "type") ?? "";
+            var deleteFlag    = studyReader.IsDBNull(studyReader.GetOrdinal("delete")) ? 0 : studyReader.GetInt32("delete");
+            var pdfReport     = Str(studyReader, "pdf_report") ?? "";
+            var transId       = studyReader.IsDBNull(studyReader.GetOrdinal("trans_id")) ? 0 : studyReader.GetInt32("trans_id");
+            var transcriberName = Str(studyReader, "transcriber_name") ?? "";
+            await studyReader.CloseAsync();
+
+            // Check if PDF exists in S3
+            bool pdfExists = false;
+            if (!string.IsNullOrWhiteSpace(pdfReport))
+            {
+                try
+                {
+                    var s3 = new AmazonS3Client();
+                    var meta = await s3.GetObjectMetadataAsync(S3Bucket, pdfReport.TrimStart('/'));
+                    pdfExists = true;
+                }
+                catch { pdfExists = false; }
+            }
+
+            // Check if audio attachment exists
+            await using var audioCmd    = QueryHelper.GetStudyAttachmentCount(conn, req.StudyId, "Audio File");
+            var audioCountObj = await audioCmd.ExecuteScalarAsync();
+            bool hasAudio     = audioCountObj != null && Convert.ToInt32(audioCountObj) > 0;
+
+            string newType  = currentType;
+            string message  = "";
+
+            // Laravel logic: StudyController::updateStatus()
+            if (currentType == "rad final report" && deleteFlag == 1 && !pdfExists && hasAudio)
+            {
+                newType = "trans_new_messages";
+                message = $"Study[#{req.StudyId}] status changed to trans new messages — audio already attached, sending to transcriber [{transcriberName}].";
+            }
+            else if (currentType == "rad final report" && deleteFlag == 1 && !pdfExists)
+            {
+                newType = "new_study";
+                message = $"Study[#{req.StudyId}] status changed to new study.";
+            }
+            else if (currentType == "rad final report" && deleteFlag == 1 && pdfExists)
+            {
+                // Just restore delete flag, keep type
+                message = "Study has been recovered.";
+            }
+            else if (currentType == "rad final report" && deleteFlag == 0 && pdfExists && hasAudio)
+            {
+                newType = "trans_new_messages";
+                message = $"Study[#{req.StudyId}] status changed to trans new messages — audio already attached, sending to transcriber [{transcriberName}].";
+            }
+            else if (currentType == "rad final report" && deleteFlag == 0 && pdfExists && !hasAudio)
+            {
+                newType = "new_study";
+                message = $"Study[#{req.StudyId}] status changed to new study.";
+            }
+            else if (currentType == "cancel exam" && !hasAudio)
+            {
+                newType = "new_study";
+                message = $"Study[#{req.StudyId}] status changed to new study.";
+            }
+            else if (currentType == "cancel exam" && hasAudio)
+            {
+                newType = "trans_new_messages";
+                message = $"Study[#{req.StudyId}] status changed to trans new messages — audio already attached, sending to transcriber [{transcriberName}].";
+            }
+
+            // Apply changes: always reset delete=0, update type if changed
+            await using var updateCmd = QueryHelper.RestoreStudyDeleteFlag(conn, req.StudyId, newType != currentType ? newType : null);
+            await updateCmd.ExecuteNonQueryAsync();
+
+            return Function.Ok(new { message, status = true });
+        }
+        catch (Exception ex) { return Err("UpdateStudyStatusAuto", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> DeleteStudyAsync(string? body)
+    {
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0)
+            return Function.BadRequest("StudyId is required.");
+        try
+        {
+            await using var conn = await OpenAsync();
+            await using var cmd  = QueryHelper.DeleteStudy(conn, req.StudyId);
+            await cmd.ExecuteNonQueryAsync();
+            return Function.Ok(null, "Study deleted.");
+        }
+        catch (Exception ex) { return Err("DeleteStudy", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> MarkAsNewStudyAsync(string? body)
+    {
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0)
+            return Function.BadRequest("StudyId is required.");
+        try
+        {
+            await using var conn = await OpenAsync();
+            await using var cmd  = QueryHelper.UpdateStudyStatus(conn, req.StudyId, "new_study");
+            await cmd.ExecuteNonQueryAsync();
+            return Function.Ok(null, "Study marked as new.");
+        }
+        catch (Exception ex) { return Err("MarkAsNewStudy", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> RestoreStudyAsync(string? body)
+    {
+        // Matches Laravel: only resets delete=0, does NOT change type/status
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0)
+            return Function.BadRequest("StudyId is required.");
+        try
+        {
+            await using var conn = await OpenAsync();
+            await using var cmd  = QueryHelper.RestoreStudyDeleteFlag(conn, req.StudyId, null);
+            await cmd.ExecuteNonQueryAsync();
+            return Function.Ok(null, "Study has been recovered.");
+        }
+        catch (Exception ex) { return Err("RestoreStudy", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> DownloadAudioZipAsync(string? body)
+    {
+        var req = Parse<StudyIdRequest>(body);
+        if (req == null || req.StudyId <= 0)
+            return Function.BadRequest("StudyId is required.");
+        try
+        {
+            await using var conn   = await OpenAsync();
+            await using var cmd    = QueryHelper.GetAttachedFiles(conn, req.StudyId, "audio");
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var files = new List<object>();
+            while (await reader.ReadAsync())
+                files.Add(new { FilePath = Str(reader, "file_path"), FileName = Str(reader, "file_name") });
+            return Function.Ok(files);
+        }
+        catch (Exception ex) { return Err("DownloadAudioZip", ex); }
+    }
+
+    public Task<APIGatewayProxyResponse> DeleteTempZipAsync(string? body)
+        => Task.FromResult(Function.Ok(null, "Temp zip deleted."));
+
+    public async Task<APIGatewayProxyResponse> GetNewStudyAsync(string? body)
+        => await GetStudiesByStatusAsync("new_study");
+
+    public async Task<APIGatewayProxyResponse> GetTransNewMessagesAsync(string? body)
+        => await GetStudiesByStatusAsync("trans_new_messages");
+
+    public async Task<APIGatewayProxyResponse> GetTransReportsOnHoldAsync(string? body)
+        => await GetStudiesByStatusAsync("trans_reports_on_hold");
+
+    public async Task<APIGatewayProxyResponse> GetRadPendingSignatureAsync(string? body)
+        => await GetStudiesByStatusAsync("rad_reports_pending_signature");
+
+    public async Task<APIGatewayProxyResponse> GetReviewAsync(string? body)
+        => await GetStudiesByStatusAsync("review");
+
+    public async Task<APIGatewayProxyResponse> GetPendingReportsAsync(string? body)
+        => await GetStudiesByStatusAsync("trans_reports_on_hold");
+
+    public async Task<APIGatewayProxyResponse> GetPendingModalitiesAsync(string? body)
+    {
+        try
+        {
+            await using var conn   = await OpenAsync();
+            await using var cmd    = QueryHelper.GetPendingModalities(conn);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var modalities = new List<string>();
+            while (await reader.ReadAsync())
+                modalities.Add(Str(reader, "modality") ?? "");
+            return Function.Ok(modalities);
+        }
+        catch (Exception ex) { return Err("GetPendingModalities", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> GetExamsByModalityAsync(string? body)
+    {
+        var req = Parse<GetStudiesRequest>(body) ?? new GetStudiesRequest();
+        try
+        {
+            await using var conn = await OpenAsync();
+            await using var cmd  = QueryHelper.GetStudies(conn, req.Dos, req.ClientName, req.ClientNameExcept,
+                req.Search, req.StatusList, req.ModalityList, _token.UserId, _token.UserType);
+            return Function.Ok(await ReadStudies(cmd));
+        }
+        catch (Exception ex) { return Err("GetExamsByModality", ex); }
+    }
+
+    public async Task<APIGatewayProxyResponse> GetPresignedUrlAsync(string? body)
+    {
+        var req = Parse<GetPresignedUrlRequest>(body);
+        var key = req?.Key ?? req?.FilePath;
+        if (string.IsNullOrWhiteSpace(key))
+            return Function.BadRequest("FilePath or Key is required.");
+        try
+        {
+            var s3 = new AmazonS3Client();
+            var presignedReq = new GetPreSignedUrlRequest
+            {
+                BucketName = S3Bucket,
+                Key        = key.TrimStart('/'),
+                Verb       = HttpVerb.GET,
+                Expires    = DateTime.UtcNow.AddMinutes(60)
+            };
+            var url = s3.GetPreSignedURL(presignedReq);
+            return Function.Ok(new { Url = url });
+        }
+        catch (Exception ex) { return Err("GetPresignedUrl", ex); }
     }
 
     public async Task<APIGatewayProxyResponse> PullQbTranscribersAsync(string? body) {

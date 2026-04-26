@@ -962,17 +962,13 @@ public static class QueryHelper
 
     public static MySqlCommand GetIncomingFaxesByClient(MySqlConnection c, string clientUsername)
     {
-        // Matches Laravel getFolderFaxItems():
-        //   fax_receiveds WHERE ref_id = user.id (exam_id is NULL in this table — filter is by referrer)
-        //   ORDER BY created_at DESC LIMIT 50
-        //   media_file = full S3 path: php/faxesin/USERNAME/filename.pdf
         var cmd = Cmd(c, @"
-            SELECT fr.id, fr.`from`, fr.media_file AS file_name, fr.created_at
+            SELECT fr.id, fr.`from`, fr.media_file AS file_name, fr.created_at, fr.modified_at
             FROM fax_receiveds fr
             JOIN tran_user u ON u.id = fr.ref_id
             WHERE u.username = @cu
             ORDER BY fr.created_at DESC
-            LIMIT 50");
+            LIMIT 100");
         cmd.Parameters.AddWithValue("@cu", clientUsername);
         return cmd;
     }

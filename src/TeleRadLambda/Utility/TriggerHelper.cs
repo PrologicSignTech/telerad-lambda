@@ -8,21 +8,39 @@ public static class TriggerHelper
 
     // ── Studies ───────────────────────────────────────────────────────────────
     public const string GetStudies                   = "getStudies";
+    public const string GetPendingBatch              = "getPendingBatch";
     public const string GetDailyWorkflowData         = "getDailyWorkflowData";
     public const string UpdateStudyStatus            = "updateStudyStatus";
+    public const string UpdateStudyStatusAuto        = "updateStudyStatusAuto";
+    public const string DeleteStudy                  = "deleteStudy";
+    public const string MarkAsNewStudy               = "markAsNewStudy";
+    public const string RestoreStudy                 = "restoreStudy";
     public const string UpdateStudy                  = "updateStudy";
     public const string MarkStat                     = "markStat";
     public const string UnmarkStat                   = "unmarkStat";
     public const string CloneStudy                   = "cloneStudy";
     public const string GetStudyAudit                = "getStudyAudit";
     public const string GetFinalReportUrl            = "getFinalReportUrl";
+    public const string GetStudyPreview              = "getStudyPreview";
+    public const string GetViewerToken               = "getViewerToken";
     public const string SaveAudit                    = "saveAudit";
     public const string UpdateStudyReport            = "updateStudyReport";
     public const string PdfReviewed                  = "pdfReviewed";
     public const string CheckForDownloadAudio        = "checkForDownloadAudio";
+    public const string DownloadAudioZip             = "downloadAudioZip";
+    public const string DeleteTempZip                = "deleteTempZip";
     public const string GetStudyDocument             = "getStudyDocument";
+    public const string GetPresignedUrl              = "getPresignedUrl";
     public const string GetVerificationSheet         = "getVerificationSheet";
     public const string GetExamHistory               = "getExamHistory";
+    public const string GetNewStudy                  = "getNewStudy";
+    public const string GetTransNewMessages          = "getTransNewMessages";
+    public const string GetTransReportsOnHold        = "getTransReportsOnHold";
+    public const string GetRadPendingSignature       = "getRadPendingSignature";
+    public const string GetReview                    = "getReview";
+    public const string GetPendingReports            = "getPendingReports";
+    public const string GetPendingModalities         = "getPendingModalities";
+    public const string GetExamsByModality           = "getExamsByModality";
 
     // ── Notes ─────────────────────────────────────────────────────────────────
     public const string GetNotes                     = "getNotes";

@@ -214,7 +214,8 @@ public class AdminHelper : HelperBase
                     FileUrl    = Str(reader, "file_name"),
                     FaxNumber  = Str(reader, "from"),
                     IsRead     = false,
-                    ReceivedAt = DateStr(reader, "created_at")
+                    ReceivedAt = DateStr(reader, "created_at"),
+                    ModifiedAt = DateStr(reader, "modified_at")
                 });
             return FunctionBase.Ok(faxes);
         }
